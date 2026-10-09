@@ -72,6 +72,9 @@ enum BarDrag27 {
                 return
             }
             event.flags = flags
+            // Ice's own mouse handlers skip events with this mark, so the press is not taken
+            // for a click on empty menu bar space that shows the hidden section.
+            event.setIntegerValueField(.eventSourceUserData, value: HIDEventManager.menuBarActivationMarker)
             event.post(tap: .cghidEventTap)
         }
 

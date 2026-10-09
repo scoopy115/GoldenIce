@@ -10,9 +10,12 @@ import OSLog
 ///
 /// MenuBarAgent keeps the order of the items itself, and the only way to change it is the
 /// user's own: a Command-drag on the bar. Both items have to be drawn for that, which an item
-/// in a hidden section is not, and an item on a full bar may be folded away. So the bar is
-/// cleared for a moment of everything but the two applications involved and Ice, the item is
-/// dragged beside its new neighbour, and concealment goes back to what the layout says.
+/// in a hidden section is not, and an item on a full bar may be folded away. So for a moment
+/// the bar shows only the section the item was dropped in — as the layout shows it — and Ice,
+/// the item is dragged beside its new neighbour, and concealment goes back to what the layout
+/// says. With only the two applications shown, MenuBarAgent placed them against items it was
+/// not drawing, and the rest of the section came out in a different order (measured on
+/// macOS 27.0.1, 2026-10-09).
 @available(macOS 27.0, *)
 @MainActor
 enum Reorderer27 {
@@ -25,7 +28,13 @@ enum Reorderer27 {
     private static var isReordering = false
 
     /// Moves `item` next to `neighbour` on the bar: before it, or after it if `after` is set.
-    static func move(_ item: MenuBarItem, nextTo neighbour: MenuBarItem, after: Bool, appState: AppState) async {
+    static func move(
+        _ item: MenuBarItem,
+        nextTo neighbour: MenuBarItem,
+        after: Bool,
+        section: [MenuBarItem],
+        appState: AppState
+    ) async {
         let concealer = appState.concealer27
         guard
             !isReordering,
@@ -43,7 +52,8 @@ enum Reorderer27 {
 
         logger.notice("Moving \(item.logString, privacy: .public) \(after ? "after" : "before", privacy: .public) \(neighbour.logString, privacy: .public)")
 
-        concealer.isolatedAllowlist = [Constants.bundleIdentifier, itemBundleID, neighbourBundleID]
+        let sectionBundleIDs = section.compactMap { $0.sourceApplication?.bundleIdentifier }
+        concealer.isolatedAllowlist = Set(sectionBundleIDs).union([Constants.bundleIdentifier, itemBundleID, neighbourBundleID])
         concealer.update()
         try? await Task.sleep(for: settle)
 

@@ -91,10 +91,17 @@ final class LayoutBarPaddingView: NSView {
                         nil
                     }
                 if let neighbour {
+                    let section = arrangedViews.map(\.item)
                     Task {
                         // Let the section change settle before the bar is cleared for the drag.
                         try? await Task.sleep(for: .milliseconds(500))
-                        await Reorderer27.move(item, nextTo: neighbour.item, after: neighbour.after, appState: appState)
+                        await Reorderer27.move(
+                            item,
+                            nextTo: neighbour.item,
+                            after: neighbour.after,
+                            section: section,
+                            appState: appState
+                        )
                     }
                 }
             }

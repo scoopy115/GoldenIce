@@ -435,6 +435,8 @@ extension HIDEventManager {
         guard
             !isDraggingMenuBarItem,
             event.modifierFlags.contains(.command),
+            // Ice's own Command-drags on macOS 27 (see `BarDrag27`) are not the user's.
+            event.cgEvent?.getIntegerValueField(.eventSourceUserData) != Self.menuBarActivationMarker,
             isMouseInsideMenuBar(appState: appState, screen: screen)
         else {
             return
