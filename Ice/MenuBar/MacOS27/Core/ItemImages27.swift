@@ -545,9 +545,11 @@ struct PhotoSchedule27 {
     static let minimumInterval: TimeInterval = 600
 
     /// A capture can come back with nothing usable: the item was folded into macOS's own
-    /// overflow, or its tile was refused as a fade. The item then has no glyph at all, which
-    /// is worth another try long before the usual ten minutes.
-    static let retryInterval: TimeInterval = 45
+    /// overflow, or its tile was refused as a fade. On a full notched bar that is the usual
+    /// outcome, and every attempt makes the bar reflow, so retrying every 45 seconds kept the
+    /// items jumping about (measured on macOS 27.0.1, 2026-10-09). The application's icon
+    /// stands in meanwhile, so a failed attempt waits half an hour.
+    static let retryInterval: TimeInterval = 1800
 
     private var nextAttempts = [String: TimeInterval]()
 

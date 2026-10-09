@@ -96,5 +96,5 @@ ditto "$APP" "$DEST/Ice.app"
 echo "==> Verifying the installed copy"
 codesign --verify --deep --strict "$DEST/Ice.app"
 
-open -a "$DEST/Ice.app"
+open ${OPEN_ARGS:-} -a "$DEST/Ice.app"
 echo "==> Running from $DEST/Ice.app"

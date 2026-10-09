@@ -125,12 +125,12 @@ struct PhotoSchedule27Tests {
         #expect(schedule.mayPhotograph(bundleID: "com.caldis.Mos", now: 1))
     }
 
-    @Test("An application that came away with no image is tried again sooner")
+    @Test("An application that came away with no image waits out the retry interval")
     func retriedWhenNothingWasStored() {
         var schedule = PhotoSchedule27()
         schedule.recordAttempt(bundleID: "ru.keepcoder.Telegram", now: 0, stored: false)
-        #expect(!schedule.mayPhotograph(bundleID: "ru.keepcoder.Telegram", now: 44))
-        #expect(schedule.mayPhotograph(bundleID: "ru.keepcoder.Telegram", now: 45))
+        #expect(!schedule.mayPhotograph(bundleID: "ru.keepcoder.Telegram", now: PhotoSchedule27.retryInterval - 1))
+        #expect(schedule.mayPhotograph(bundleID: "ru.keepcoder.Telegram", now: PhotoSchedule27.retryInterval))
     }
 }
 
