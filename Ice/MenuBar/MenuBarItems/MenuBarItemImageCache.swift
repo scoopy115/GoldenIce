@@ -352,6 +352,14 @@ final class MenuBarItemImageCache: ObservableObject {
             let existing = await MainActor.run { Set(images.keys) }
             var newImages = [MenuBarItemTag: CapturedImage]()
             for item in items {
+                if item.tag == .visibleControlItem {
+                    // Ice's own icon is never photographed (see `ItemImageStore27`), so it is
+                    // drawn from the icon in Settings instead of showing as an empty tile.
+                    if let image = await MainActor.run(body: { Self.iceIconImage(for: item, appState: appState) }) {
+                        newImages[item.tag] = image
+                    }
+                    continue
+                }
                 if let image = await store.image(for: item) {
                     newImages[item.tag] = image
                 } else if !existing.contains(item.tag), let icon = Self.applicationIcon(for: item) {
@@ -516,6 +524,71 @@ extension MenuBarItemImageCache {
         context.interpolationQuality = .high
         context.draw(cgIcon, in: rect)
         guard let image = context.makeImage() else {
+            return nil
+        }
+        return CapturedImage(cgImage: image, scale: scale)
+    }
+}
+
+// MARK: - Ice Icon
+
+extension MenuBarItemImageCache {
+    /// Draws Ice's own icon, as Settings has it, at the size of its item on the bar.
+    @MainActor
+    static func iceIconImage(for item: MenuBarItem, appState: AppState) -> CapturedImage? {
+        let general = appState.settings.general
+        guard let icon = general.iceIcon.hidden.nsImage(for: appState) else {
+            return nil
+        }
+        let scale: CGFloat = 2
+        let canvas = CGSize(
+            width: max(item.bounds.width, icon.size.width + 8),
+            height: max(item.bounds.height, 22)
+        )
+        // Custom icons are scaled to fit, as the status item does.
+        let ratio = max(icon.size.width / 25, icon.size.height / 17, 1)
+        let iconSize = CGSize(width: icon.size.width / ratio, height: icon.size.height / ratio)
+        let isTemplate: Bool = switch general.iceIcon.name {
+        case .custom: general.customIceIconIsTemplate
+        default: true // The built-in icons are templates.
+        }
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(canvas.width * scale),
+            pixelsHigh: Int(canvas.height * scale),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
+            return nil
+        }
+        rep.size = canvas
+        NSGraphicsContext.saveGraphicsState()
+        defer {
+            NSGraphicsContext.restoreGraphicsState()
+        }
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        let rect = CGRect(
+            x: (canvas.width - iconSize.width) / 2,
+            y: (canvas.height - iconSize.height) / 2,
+            width: iconSize.width,
+            height: iconSize.height
+        )
+        NSApp.effectiveAppearance.performAsCurrentDrawingAppearance {
+            icon.draw(in: rect)
+            if isTemplate {
+                // Template icons are black shapes; fill them with the label color, as the
+                // menu bar does.
+                NSColor.labelColor.set()
+                rect.fill(using: .sourceAtop)
+            }
+        }
+        NSGraphicsContext.current = nil
+        guard let image = rep.cgImage else {
             return nil
         }
         return CapturedImage(cgImage: image, scale: scale)

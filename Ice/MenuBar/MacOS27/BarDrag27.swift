@@ -81,6 +81,7 @@ enum BarDrag27 {
         CGAssociateMouseAndMouseCursorPosition(0)
         MouseHelpers.hideCursor()
         defer {
+            releaseCommand(source: source)
             if let origin {
                 CGWarpMouseCursorPosition(origin)
             }
@@ -102,5 +103,25 @@ enum BarDrag27 {
         usleep(300_000)
         post(.leftMouseUp, at: end, flags: .maskCommand)
         usleep(50_000)
+    }
+
+    /// Lets go of the Command key the drag held.
+    ///
+    /// Mouse events posted to the HID stream with Command in their flags leave the system
+    /// thinking Command is still down. Every click after that, the user's own included, then
+    /// lands as a Command-click: menu bar items stopped opening, as Command-clicking them starts
+    /// a drag instead (measured on macOS 27.0.1, 2026-10-09).
+    private nonisolated static func releaseCommand(source: CGEventSource?) {
+        if let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 55, keyDown: false) {
+            keyUp.flags = []
+            keyUp.setIntegerValueField(.eventSourceUserData, value: HIDEventManager.menuBarActivationMarker)
+            keyUp.post(tap: .cghidEventTap)
+        }
+        if let flagsChanged = CGEvent(source: source) {
+            flagsChanged.type = .flagsChanged
+            flagsChanged.flags = []
+            flagsChanged.setIntegerValueField(.eventSourceUserData, value: HIDEventManager.menuBarActivationMarker)
+            flagsChanged.post(tap: .cghidEventTap)
+        }
     }
 }
