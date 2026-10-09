@@ -1,30 +1,29 @@
 # Releasing GoldenIce
 
-GoldenIce updates itself with Sparkle, like Ice. Until the steps below are done it still points
-at upstream Ice's feed, which is harmless: GoldenIce's build numbers (2700 and up) are higher
-than any upstream build, so it is never offered one.
+GoldenIce updates itself in the app with Sparkle, as Ice did: it reads a feed, offers the new
+version, and installs it with one click. The feed is the `appcast.xml` attached to the latest
+GitHub release:
 
-## One-time setup
+    https://github.com/scoopy115/GoldenIce/releases/latest/download/appcast.xml
 
-1. **Update key.** Run Sparkle's `generate_keys` (in the Sparkle package's `bin` folder after a
-   build, e.g. `…/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_keys`). It stores the
-   private key in your keychain and prints the public key.
-2. **Point the app at GoldenIce's feed.** In `Ice/Resources/Info.plist` set
-   - `SUFeedURL` to `https://github.com/scoopy115/GoldenIce/releases/latest/download/appcast.xml`
-   - `SUPublicEDKey` to the public key from step 1.
+## One-time setup (done)
 
-   Do both in the same release: a build with the new feed but upstream's key cannot verify
-   GoldenIce's updates, and one with the new key but upstream's feed has nothing to install.
-3. **Notarization.** Store credentials with `xcrun notarytool store-credentials <profile>`, then
-   create `Scripts/release.local.env` containing `NOTARY_PROFILE=<profile>`. That file is
-   ignored by git, so neither the profile nor anything about the signing identity is committed;
-   the Developer ID certificate is looked up in the keychain at build time.
+- **Update key.** GoldenIce's EdDSA key is in the login keychain under the account `goldenice`
+  (Sparkle's `generate_keys --account goldenice`). Its public half is `SUPublicEDKey` in
+  `Ice/Resources/Info.plist`. Keep the private half safe: without it, installed copies cannot
+  verify new versions. Export a backup with `generate_keys --account goldenice -x <file>` and
+  keep that file off the repository.
+- **Notarization.** `Scripts/release.local.env` (ignored by git) names the notarytool keychain
+  profile: `NOTARY_PROFILE=<profile>`. The Developer ID certificate is found in the keychain.
 
 ## Each release
 
-1. Raise `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` in the project.
-2. Run `Scripts/release.sh`. It builds a signed, notarized app as a zip and a DMG in
-   `build/releases` (ignored by git). Add `--appcast` once the update key is set up.
-3. Create a GitHub release tagged `v<version>` and attach the files.
+1. Raise `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` in the project. Sparkle compares
+   `CURRENT_PROJECT_VERSION`, so it must go up every time.
+2. Run `Scripts/release.sh --appcast`. It builds, signs and notarizes the app and a DMG, and
+   writes `appcast.xml`, all in `build/releases` (ignored by git). Keep the previous
+   `appcast.xml` there, so the new one lists earlier versions too.
+3. On GitHub, create a release tagged `v<version>` (not a draft or pre-release, or it is not
+   "latest") and attach the DMG and `appcast.xml`.
 
-Installed copies find the update the next time Sparkle checks.
+Installed copies find the update at their next check, or at once with "Check for Updates".
