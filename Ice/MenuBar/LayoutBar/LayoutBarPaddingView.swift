@@ -74,10 +74,29 @@ final class LayoutBarPaddingView: NSView {
         }
 
         if #available(macOS 27.0, *), let appState = container.appState {
-            // On macOS 27 the saved layout decides sections and macOS orders the items within
-            // one, so a drop only moves the item's application to this section.
-            if !draggingSource.item.isControlItem, let bundleID = draggingSource.item.sourceApplication?.bundleIdentifier {
+            // On macOS 27 the saved layout decides sections, by application, and MenuBarAgent
+            // keeps the order. A drop moves the item's application to this section, then drags
+            // the item beside its new neighbour on the bar so the order matches the layout.
+            let item = draggingSource.item
+            if !item.isControlItem, let bundleID = item.sourceApplication?.bundleIdentifier {
                 appState.concealer27.setSection(MacOS27Section(container.section), for: bundleID)
+            }
+            if let index = arrangedViews.firstIndex(of: draggingSource) {
+                let neighbour: (item: MenuBarItem, after: Bool)? =
+                    if arrangedViews.indices.contains(index + 1) {
+                        (arrangedViews[index + 1].item, false)
+                    } else if arrangedViews.indices.contains(index - 1) {
+                        (arrangedViews[index - 1].item, true)
+                    } else {
+                        nil
+                    }
+                if let neighbour {
+                    Task {
+                        // Let the section change settle before the bar is cleared for the drag.
+                        try? await Task.sleep(for: .milliseconds(500))
+                        await Reorderer27.move(item, nextTo: neighbour.item, after: neighbour.after, appState: appState)
+                    }
+                }
             }
             return true
         }
