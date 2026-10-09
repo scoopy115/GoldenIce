@@ -205,6 +205,36 @@ final class MenuBarSection {
 
         startRehideChecks()
         updateConcealment27()
+        showOverflowInIceBar27()
+    }
+
+    /// Opens the Ice Bar for the items macOS folded away once hidden items are shown on a full
+    /// bar, where they would otherwise be out of reach beside the notch.
+    private func showOverflowInIceBar27() {
+        guard
+            #available(macOS 27.0, *),
+            let appState,
+            let menuBarManager,
+            appState.settings.general.showOverflowInIceBar,
+            let screen = screenForIceBar
+        else {
+            return
+        }
+        Task {
+            // Let MenuBarAgent lay the revealed items out before seeing what it folded.
+            try? await Task.sleep(for: .milliseconds(800))
+            await appState.itemManager.cacheItemsRegardless()
+            guard !isHidden, !menuBarManager.iceBarPanel.isVisible else {
+                return
+            }
+            let cache = appState.itemManager.itemCache
+            let folded = (cache.managedItems(for: .visible) + cache.managedItems(for: .hidden))
+                .filter { !$0.isControlItem && BarDrag27.isFolded($0) }
+            guard !folded.isEmpty else {
+                return
+            }
+            await menuBarManager.iceBarPanel.show(section: .hidden, on: screen, overflowOnly: true)
+        }
     }
 
     /// Hides the section.

@@ -178,6 +178,10 @@ struct GeneralSettingsPane: View {
         if settings.useIceBar {
             iceBarLocationPicker
         }
+        if #available(macOS 27.0, *) {
+            Toggle("Show items that don't fit in the Ice Bar", isOn: $settings.showOverflowInIceBar)
+                .annotation("macOS folds items that don't fit beside the notch out of reach. Ice lists them in the Ice Bar, and opens it for them when you show hidden items in the menu bar.")
+        }
     }
 
     @ViewBuilder

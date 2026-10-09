@@ -158,7 +158,7 @@ final class IceBarPanel: NSPanel {
 
     /// Shows the panel on the given screen, displaying the given
     /// menu bar section.
-    func show(section: MenuBarSection.Name, on screen: NSScreen) async {
+    func show(section: MenuBarSection.Name, on screen: NSScreen, overflowOnly: Bool = false) async {
         let requestedAt = ContinuousClock.now
         guard let appState else {
             return
@@ -197,7 +197,8 @@ final class IceBarPanel: NSPanel {
             appState: appState,
             colorManager: colorManager,
             screen: screen,
-            section: section
+            section: section,
+            overflowOnly: overflowOnly
         )
 
         updateOrigin(for: screen)
@@ -249,7 +250,8 @@ private final class IceBarHostingView: NSHostingView<IceBarContentView> {
         appState: AppState,
         colorManager: IceBarColorManager,
         screen: NSScreen,
-        section: MenuBarSection.Name
+        section: MenuBarSection.Name,
+        overflowOnly: Bool
     ) {
         let rootView = IceBarContentView(
             appState: appState,
@@ -259,7 +261,8 @@ private final class IceBarHostingView: NSHostingView<IceBarContentView> {
             imageCache: appState.imageCache,
             menuBarManager: appState.menuBarManager,
             screen: screen,
-            section: section
+            section: section,
+            overflowOnly: overflowOnly
         )
         super.init(rootView: rootView)
     }
@@ -296,8 +299,23 @@ private struct IceBarContentView: View {
     let screen: NSScreen
     let section: MenuBarSection.Name
 
+    /// Whether the bar shows only the items macOS folded away beside the notch, for a menu bar
+    /// that reveals hidden items in place rather than in the Ice Bar.
+    var overflowOnly = false
+
     private var items: [MenuBarItem] {
-        itemManager.itemCache.managedItems(for: section)
+        var items = overflowOnly ? [] : itemManager.itemCache.managedItems(for: section)
+        if #available(macOS 27.0, *), section != .visible, appState.settings.general.showOverflowInIceBar {
+            // On a full bar macOS folds what does not fit into its own overflow, out of reach
+            // on a notched display. Those items are listed here too, ahead of the hidden ones.
+            let candidates = overflowOnly
+                ? itemManager.itemCache.managedItems(for: .visible) + itemManager.itemCache.managedItems(for: .hidden)
+                : itemManager.itemCache.managedItems(for: .visible)
+            let folded = candidates.filter { !$0.isControlItem && BarDrag27.isFolded($0) }
+            let shown = Set(items.map(\.tag))
+            items = folded.filter { !shown.contains($0.tag) } + items
+        }
+        return items
     }
 
     private var configuration: MenuBarAppearanceConfigurationV2 {

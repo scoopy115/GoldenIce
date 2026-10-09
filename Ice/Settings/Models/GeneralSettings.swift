@@ -31,6 +31,9 @@ final class GeneralSettings: ObservableObject {
     /// in a separate bar below the menu bar.
     @Published var useIceBar = false
 
+    /// Whether items macOS folds away beside the notch are shown in the Ice Bar (macOS 27).
+    @Published var showOverflowInIceBar = true
+
     /// The location where the Ice Bar appears.
     @Published var iceBarLocation: IceBarLocation = .dynamic
 
@@ -93,6 +96,7 @@ final class GeneralSettings: ObservableObject {
         Defaults.ifPresent(key: .showIceIcon, assign: &showIceIcon)
         Defaults.ifPresent(key: .customIceIconIsTemplate, assign: &customIceIconIsTemplate)
         Defaults.ifPresent(key: .useIceBar, assign: &useIceBar)
+        Defaults.ifPresent(key: .showOverflowInIceBar, assign: &showOverflowInIceBar)
         Defaults.ifPresent(key: .showOnClick, assign: &showOnClick)
         Defaults.ifPresent(key: .showOnHover, assign: &showOnHover)
         Defaults.ifPresent(key: .showOnScroll, assign: &showOnScroll)
@@ -163,6 +167,13 @@ final class GeneralSettings: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { useIceBar in
                 Defaults.set(useIceBar, forKey: .useIceBar)
+            }
+            .store(in: &c)
+
+        $showOverflowInIceBar
+            .receive(on: DispatchQueue.main)
+            .sink { show in
+                Defaults.set(show, forKey: .showOverflowInIceBar)
             }
             .store(in: &c)
 
