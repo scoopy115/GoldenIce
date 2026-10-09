@@ -558,6 +558,46 @@ struct FadedTile27Tests {
             #expect(alpha(8, y) == 0)
         }
     }
+
+    @Test("A faint outline around a solid fill is kept, with its tip, and a streak beside it is not")
+    func faintOutlineKept() {
+        // AlDente's battery: a translucent outline and tip around a solid fill they do not
+        // touch (seen on macOS 27.0.1), and a faint streak further off.
+        let width = 20
+        let height = 9
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        func set(_ x: Int, _ y: Int, _ alpha: UInt8) {
+            pixels[(y * width + x) * 4 + 3] = alpha
+        }
+        for x in 1...11 {
+            set(x, 1, 110)
+            set(x, 7, 110)
+        }
+        for y in 1...7 {
+            set(1, y, 110)
+            set(11, y, 110)
+        }
+        for y in 3...5 {
+            for x in 3...6 {
+                set(x, y, 255)
+            }
+            set(13, y, 90) // the tip, one column clear of the outline
+        }
+        for y in 0..<height {
+            set(18, y, 50)
+        }
+        let result = ItemImages27.droppingFaintMarks(pixels: pixels, width: width, height: height)
+        func alpha(_ x: Int, _ y: Int) -> UInt8 {
+            result[(y * width + x) * 4 + 3]
+        }
+        #expect(alpha(4, 4) == 255)
+        #expect(alpha(1, 4) == 110)
+        #expect(alpha(6, 1) == 110)
+        #expect(alpha(13, 4) == 90)
+        for y in 0..<height {
+            #expect(alpha(18, y) == 0)
+        }
+    }
 }
 
 @Suite("Items zone")

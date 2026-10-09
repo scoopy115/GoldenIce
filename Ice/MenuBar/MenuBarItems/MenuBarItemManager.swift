@@ -97,6 +97,29 @@ final class MenuBarItemManager: ObservableObject {
             .store(in: &c)
 
         if #available(macOS 27.0, *) {
+            // Switching an application off or on in System Settings > Menu Bar neither launches
+            // nor quits anything, so nothing above notices it, and the layout window showed it
+            // in the wrong bar for up to the 30 second sweep. While that window is open, the
+            // items are read every couple of seconds instead (a read takes about 60 ms).
+            Timer.publish(every: 2, on: .main, in: .default)
+                .autoconnect()
+                .sink { [weak self, weak appState] _ in
+                    guard
+                        let self,
+                        let navigation = appState?.navigationState,
+                        navigation.isSettingsPresented,
+                        navigation.settingsNavigationIdentifier == .menuBarLayout
+                    else {
+                        return
+                    }
+                    Task {
+                        await self.cacheItemsIfNeeded()
+                    }
+                }
+                .store(in: &c)
+        }
+
+        if #available(macOS 27.0, *) {
             // Accessibility reports frames only for the active menu bar, so read the
             // items again soon after it moves to another display.
             NSWorkspace.shared.notificationCenter
@@ -456,7 +479,11 @@ extension MenuBarItemManager {
             // There is no item window list on macOS 27. A reorder keeps the synthetic
             // identifiers, so the signature also carries each item's position.
             let items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
-            let signature = items.map { $0.windowID &+ UInt32(truncatingIfNeeded: Int($0.bounds.minX)) }
+            // An item macOS stops drawing keeps its x but drops below the screen, so the
+            // vertical position counts too.
+            let signature = items.map {
+                $0.windowID &+ UInt32(truncatingIfNeeded: Int($0.bounds.minX)) &+ UInt32(truncatingIfNeeded: Int($0.bounds.minY) &* 7919)
+            }
             if await cacheActor.cachedItemWindowIDs != signature {
                 await cacheItemsRegardless(signature, readItems: items)
             }

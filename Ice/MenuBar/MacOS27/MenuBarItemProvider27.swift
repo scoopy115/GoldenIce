@@ -431,6 +431,12 @@ enum MenuBarItemProvider27 {
                 // Ice's own items are collapsed to nothing on macOS 27 and report a frame at
                 // the origin, which would drag the edge to the left of the whole bar and make
                 // every spot count as occupied, so hovering would never reveal anything again.
+                // Ice's own icon counts once it is drawn with a real width: placed at the far
+                // left, it is the edge, and the capture indicator drawn left of the edge would
+                // otherwise cover it (seen on macOS 27.0.1, 2026-10-09).
+                if item.tag == .visibleControlItem {
+                    return item.isOnScreen && item.bounds.width > 4 && item.bounds.minY < (activeDisplayBounds?.minY ?? 0) + 40
+                }
                 return item.isOnScreen && item.ownerPID != ownPID && !item.isControlItem && item.bounds.width > 4
             }
             .map(\.bounds.minX)

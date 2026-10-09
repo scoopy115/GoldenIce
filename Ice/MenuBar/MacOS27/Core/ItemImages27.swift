@@ -202,21 +202,53 @@ enum ItemImages27 {
     /// came through as a faint streak beside every one of them, at the very same pixels
     /// (measured on macOS 27.0). A glyph's own soft rim touches its solid core, while such a
     /// mark stands apart and never reaches solid, so marks are kept or dropped whole.
+    ///
+    /// Some glyphs are drawn partly translucent on purpose, though: AlDente's battery is a
+    /// faint outline, with a faint tip, around a solid fill it does not touch, and dropping the
+    /// outline left a black square (seen on macOS 27.0.1, 2026-10-09). A faint mark that
+    /// encloses a solid one is part of the glyph, and so is a faint mark touching such an
+    /// outline; a streak beside a glyph encloses nothing.
     static func droppingFaintMarks(pixels: [UInt8], width: Int, height: Int) -> [UInt8] {
         let count = width * height
         guard count > 0, pixels.count >= count * 4 else {
             return pixels
         }
-        var result = pixels
+
+        struct Mark {
+            var pixels: [Int]
+            var strongest: UInt8
+            var minX: Int, maxX: Int, minY: Int, maxY: Int
+
+            var isSolid: Bool { strongest >= ItemImages27.solidMark }
+
+            func encloses(_ other: Mark) -> Bool {
+                let centreX = (other.minX + other.maxX) / 2
+                let centreY = (other.minY + other.maxY) / 2
+                return minX < other.minX && maxX > other.maxX &&
+                    minY <= centreY && maxY >= centreY &&
+                    minX < centreX && maxX > centreX
+            }
+
+            func touches(_ other: Mark, within margin: Int) -> Bool {
+                minX <= other.maxX + margin && maxX >= other.minX - margin &&
+                    minY <= other.maxY + margin && maxY >= other.minY - margin
+            }
+        }
+
+        var marks = [Mark]()
         var visited = [Bool](repeating: false, count: count)
         for start in 0..<count where !visited[start] && pixels[start * 4 + 3] > visibleAlpha {
             // Gather the mark this pixel belongs to, neighbours in all eight directions.
-            var mark = [start]
-            var strongest = pixels[start * 4 + 3]
+            var mark = Mark(
+                pixels: [start],
+                strongest: pixels[start * 4 + 3],
+                minX: start % width, maxX: start % width,
+                minY: start / width, maxY: start / width
+            )
             visited[start] = true
             var cursor = 0
-            while cursor < mark.count {
-                let pixel = mark[cursor]
+            while cursor < mark.pixels.count {
+                let pixel = mark.pixels[cursor]
                 cursor += 1
                 let x = pixel % width
                 let y = pixel / width
@@ -232,15 +264,30 @@ enum ItemImages27 {
                             continue
                         }
                         visited[neighbour] = true
-                        strongest = max(strongest, pixels[neighbour * 4 + 3])
-                        mark.append(neighbour)
+                        mark.strongest = max(mark.strongest, pixels[neighbour * 4 + 3])
+                        mark.minX = min(mark.minX, nx)
+                        mark.maxX = max(mark.maxX, nx)
+                        mark.minY = min(mark.minY, ny)
+                        mark.maxY = max(mark.maxY, ny)
+                        mark.pixels.append(neighbour)
                     }
                 }
             }
-            guard strongest < solidMark else {
+            marks.append(mark)
+        }
+
+        let solid = marks.filter(\.isSolid)
+        let outlines = marks.filter { mark in
+            !mark.isSolid && solid.contains { mark.encloses($0) }
+        }
+        var result = pixels
+        for mark in marks where !mark.isSolid {
+            let isOutline = solid.contains { mark.encloses($0) }
+            let touchesOutline = outlines.contains { mark.touches($0, within: 3) }
+            guard !isOutline, !touchesOutline else {
                 continue
             }
-            for pixel in mark {
+            for pixel in mark.pixels {
                 result[pixel * 4 + 3] = 0
             }
         }
