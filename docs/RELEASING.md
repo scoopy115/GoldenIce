@@ -15,13 +15,16 @@ than any upstream build, so it is never offered one.
 
    Do both in the same release: a build with the new feed but upstream's key cannot verify
    GoldenIce's updates, and one with the new key but upstream's feed has nothing to install.
-3. **Notarization.** `xcrun notarytool store-credentials GoldenIce` with your Apple ID and an
-   app-specific password, so the release script can notarize without asking.
+3. **Notarization.** Store credentials with `xcrun notarytool store-credentials <profile>`, then
+   create `Scripts/release.local.env` containing `NOTARY_PROFILE=<profile>`. That file is
+   ignored by git, so neither the profile nor anything about the signing identity is committed;
+   the Developer ID certificate is looked up in the keychain at build time.
 
 ## Each release
 
 1. Raise `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` in the project.
-2. Run `Scripts/release.sh`. It builds a signed, notarized zip and an appcast in `build/releases`.
-3. Create a GitHub release tagged `v<version>` and attach both files.
+2. Run `Scripts/release.sh`. It builds a signed, notarized app as a zip and a DMG in
+   `build/releases` (ignored by git). Add `--appcast` once the update key is set up.
+3. Create a GitHub release tagged `v<version>` and attach the files.
 
 Installed copies find the update the next time Sparkle checks.

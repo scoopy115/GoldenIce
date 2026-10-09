@@ -75,7 +75,7 @@ struct SettingsView: View {
                 }
             } header: {
                 Text("GoldenIce")
-                    .font(.system(size: sidebarFontSize * 2.67, weight: .medium))
+                    .font(.system(size: sidebarFontSize * 1.9, weight: .medium))
                     .foregroundStyle(sidebarTextStyle)
                     .padding(.leading, sidebarPadding)
                     .padding(.bottom, sidebarFontSize)

@@ -129,7 +129,7 @@ struct MenuBarLayoutSettingsPane: View {
 /// They belong to no section: hiding or showing them changes nothing until macOS is allowed to
 /// draw them again, so they are kept apart from the sections Ice controls.
 @available(macOS 27.0, *)
-private struct DisabledItemsBar: View {
+struct DisabledItemsBar: View {
     @ObservedObject var concealer: Concealer27
 
     /// The System Settings pane with the "Allow in the Menu Bar" switches.

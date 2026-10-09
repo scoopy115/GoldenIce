@@ -262,23 +262,21 @@ private struct ProfileEditor: View {
                     }
                 }
 
-                LabeledContent("Switch automatically") {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Picker("", selection: Binding(
-                            get: { profile.trigger },
-                            set: { manager.setTrigger($0, for: profile) }
-                        )) {
-                            Text("Never — I switch by hand").tag(LayoutProfile.Trigger.manual)
-                            Text("When I connect an external display").tag(LayoutProfile.Trigger.externalDisplay)
-                            Text("When I'm on the built-in display alone").tag(LayoutProfile.Trigger.builtInDisplayOnly)
-                        }
-                        .pickerStyle(.radioGroup)
-                        .labelsHidden()
-                        Text("Every display shows the same menu bar. This only decides when GoldenIce switches to this profile by itself; one profile at a time can do so for each situation.")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                LabeledContent {
+                    Picker("", selection: Binding(
+                        get: { profile.trigger },
+                        set: { manager.setTrigger($0, for: profile) }
+                    )) {
+                        Text("Never").tag(LayoutProfile.Trigger.manual)
+                        Text("When an external display is connected").tag(LayoutProfile.Trigger.externalDisplay)
+                        Text("When only the built-in display is used").tag(LayoutProfile.Trigger.builtInDisplayOnly)
                     }
+                    .labelsHidden()
+                    .fixedSize()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                } label: {
+                    Text("Switch automatically")
+                    Text("Every display shows the same menu bar; this decides when GoldenIce switches to this profile by itself.")
                 }
 
                 Divider()
@@ -299,6 +297,7 @@ private struct ProfileEditor: View {
                             }
                         }
                     }
+                    DisabledItemsBar(concealer: appState.concealer27)
                 }
 
                 HStack {

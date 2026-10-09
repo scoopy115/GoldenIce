@@ -3,3 +3,6 @@ build/
 xcuserdata/
 .build/
 .swiftpm/
+
+# Machine-specific signing and notarization settings
+*.local.env

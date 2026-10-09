@@ -1,31 +1,46 @@
 #!/bin/bash
 #
-# Builds a GoldenIce release: a Developer ID signed, notarized GoldenIce.app in a zip, plus a
-# Sparkle appcast entry signed with GoldenIce's own update key. Nothing is uploaded; the
-# printed steps say what to publish where. See docs/RELEASING.md.
+# Builds a GoldenIce release: GoldenIce.app signed with Developer ID and notarized, as a zip
+# and a DMG. Nothing is uploaded. See docs/RELEASING.md.
 #
-# Usage: Scripts/release.sh [--skip-notarize]
+# Usage: Scripts/release.sh [--skip-notarize] [--appcast]
 #
-# Needs once:
-#   - A Developer ID Application certificate in the keychain.
-#   - A notarytool keychain profile named "GoldenIce" (xcrun notarytool store-credentials).
-#   - GoldenIce's Sparkle key in the keychain (Sparkle's generate_keys, see docs/RELEASING.md),
-#     with its public half in Ice/Resources/Info.plist as SUPublicEDKey.
+# Machine-specific settings live in Scripts/release.local.env, which git ignores, so that
+# nothing about the signing identity or notarization credentials ends up in the repository:
+#
+#     NOTARY_PROFILE=<name of a `xcrun notarytool store-credentials` keychain profile>
+#
+# The Developer ID certificate is found in the keychain; its team is never written down.
 #
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+LOCAL_CONFIG="$ROOT/Scripts/release.local.env"
+# shellcheck disable=SC1090
+[ -f "$LOCAL_CONFIG" ] && source "$LOCAL_CONFIG"
+
 DERIVED="${DERIVED:-/tmp/goldenice-release}"
 OUT="${OUT:-$ROOT/build/releases}"
 NOTARIZE=1
-[ "${1:-}" = "--skip-notarize" ] && NOTARIZE=0
+APPCAST=0
+for ARG in "$@"; do
+    case "$ARG" in
+        --skip-notarize) NOTARIZE=0 ;;
+        --appcast) APPCAST=1 ;;
+        *) echo "error: unknown option $ARG" >&2; exit 1 ;;
+    esac
+done
+if [ "$NOTARIZE" = 1 ] && [ -z "${NOTARY_PROFILE:-}" ]; then
+    echo "error: set NOTARY_PROFILE in Scripts/release.local.env, or pass --skip-notarize" >&2
+    exit 1
+fi
 
 TEAM="$(security find-certificate -c "Developer ID Application" -p 2>/dev/null \
     | openssl x509 -noout -subject 2>/dev/null \
     | sed -n 's/.*OU *= *\([A-Z0-9]*\).*/\1/p' | head -1)"
-[ -n "$TEAM" ] || { echo "error: no Developer ID Application certificate" >&2; exit 1; }
+[ -n "$TEAM" ] || { echo "error: no Developer ID Application certificate in the keychain" >&2; exit 1; }
 
-echo "==> Building Release, signed with Developer ID ($TEAM)"
+echo "==> Building Release, signed with Developer ID"
 xcodebuild -project "$ROOT/Ice.xcodeproj" -scheme Ice -configuration Release \
     -destination 'platform=macOS' -derivedDataPath "$DERIVED" build \
     DEVELOPMENT_TEAM="$TEAM" CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="Developer ID Application" \
@@ -37,32 +52,45 @@ VERSION="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP/C
 BUILD="$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$APP/Contents/Info.plist")"
 mkdir -p "$OUT"
 ZIP="$OUT/GoldenIce-$VERSION.zip"
+DMG="$OUT/GoldenIce-$VERSION.dmg"
+rm -f "$ZIP" "$DMG"
 
+echo "==> Verifying the signature"
 codesign --verify --deep --strict "$APP"
-ditto -c -k --keepParent "$APP" "$ZIP"
 
 if [ "$NOTARIZE" = 1 ]; then
-    echo "==> Notarizing"
-    xcrun notarytool submit "$ZIP" --keychain-profile GoldenIce --wait
+    echo "==> Notarizing the app"
+    ditto -c -k --keepParent "$APP" "$OUT/notarize.zip"
+    xcrun notarytool submit "$OUT/notarize.zip" --keychain-profile "$NOTARY_PROFILE" --wait
+    rm -f "$OUT/notarize.zip"
     xcrun stapler staple "$APP"
-    rm -f "$ZIP"
-    ditto -c -k --keepParent "$APP" "$ZIP"
 fi
 
-SPARKLE_BIN="$(find "$DERIVED/SourcePackages/artifacts" -path '*Sparkle/bin' -type d | head -1)"
-echo "==> Generating the appcast"
-"$SPARKLE_BIN/generate_appcast" \
-    --download-url-prefix "https://github.com/scoopy115/GoldenIce/releases/download/v$VERSION/" \
-    -o "$OUT/appcast.xml" "$OUT"
+echo "==> Packaging"
+ditto -c -k --keepParent "$APP" "$ZIP"
+STAGING="$(mktemp -d)"
+ditto "$APP" "$STAGING/GoldenIce.app"
+ln -s /Applications "$STAGING/Applications"
+hdiutil create -quiet -volname "GoldenIce $VERSION" -srcfolder "$STAGING" -ov -format UDZO "$DMG"
+rm -rf "$STAGING"
+codesign --sign "Developer ID Application" --timestamp "$DMG"
 
-cat <<NEXT
+if [ "$NOTARIZE" = 1 ]; then
+    echo "==> Notarizing the DMG"
+    xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
+    xcrun stapler staple "$DMG"
+    spctl -a -t open --context context:primary-signature -v "$DMG" 2>&1 | sed 's/^/    /'
+    spctl -a -vv "$APP" 2>&1 | sed 's/^/    /'
+fi
 
-Built GoldenIce $VERSION ($BUILD):
-  $ZIP
-  $OUT/appcast.xml
+if [ "$APPCAST" = 1 ]; then
+    SPARKLE_BIN="$(find "$DERIVED/SourcePackages/artifacts" -path '*Sparkle/bin' -type d | head -1)"
+    echo "==> Generating the appcast"
+    "$SPARKLE_BIN/generate_appcast" \
+        --download-url-prefix "https://github.com/scoopy115/GoldenIce/releases/download/v$VERSION/" \
+        -o "$OUT/appcast.xml" "$OUT"
+fi
 
-To publish (by hand, when you decide to):
-  1. Create a GitHub release tagged v$VERSION and attach the zip.
-  2. Attach appcast.xml to the same release, so the feed URL
-     https://github.com/scoopy115/GoldenIce/releases/latest/download/appcast.xml serves it.
-NEXT
+echo
+echo "Built GoldenIce $VERSION ($BUILD) in $OUT"
+ls -1 "$OUT" | sed 's/^/  /'
