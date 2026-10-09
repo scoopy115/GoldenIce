@@ -111,8 +111,9 @@ final class AdvancedSettings: ObservableObject {
             }
             .store(in: &c)
 
+        // Slider values change continuously while dragging.
         $showOnHoverDelay
-            .receive(on: DispatchQueue.main)
+            .debounce(for: 0.3, scheduler: DispatchQueue.main)
             .sink { delay in
                 Defaults.set(delay, forKey: .showOnHoverDelay)
             }
@@ -125,10 +126,24 @@ final class AdvancedSettings: ObservableObject {
             }
             .store(in: &c)
 
+        // Slider values change continuously while dragging.
         $tempShowInterval
-            .receive(on: DispatchQueue.main)
+            .debounce(for: 0.3, scheduler: DispatchQueue.main)
             .sink { interval in
                 Defaults.set(interval, forKey: .tempShowInterval)
+            }
+            .store(in: &c)
+
+        // Save the latest slider values in case the app terminates before
+        // the debounce interval elapses.
+        NotificationCenter.default
+            .publisher(for: NSApplication.willTerminateNotification)
+            .sink { [weak self] _ in
+                guard let self else {
+                    return
+                }
+                Defaults.set(showOnHoverDelay, forKey: .showOnHoverDelay)
+                Defaults.set(tempShowInterval, forKey: .tempShowInterval)
             }
             .store(in: &c)
 

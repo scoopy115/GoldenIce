@@ -121,10 +121,12 @@ extension WindowInfo {
     static func wallpaperWindow(from windows: [WindowInfo], for display: CGDirectDisplayID) -> WindowInfo? {
         let displayBounds = CGDisplayBounds(display)
         return windows.first { window in
-            // Wallpaper window belongs to the Dock process.
-            window.owningApplication?.bundleIdentifier == "com.apple.dock" &&
+            // Wallpaper window belongs to the Dock process, or to WindowManager
+            // on macOS 27 (measured on macOS 27.0). Looking up the owning
+            // application costs the most, so it is checked last.
             window.title?.hasPrefix("Wallpaper") == true &&
-            displayBounds.contains(window.bounds)
+            displayBounds.contains(window.bounds) &&
+            ["com.apple.dock", "com.apple.WindowManager"].contains(window.owningApplication?.bundleIdentifier)
         }
     }
 
@@ -163,7 +165,10 @@ extension WindowInfo: Equatable {
     static func == (lhs: WindowInfo, rhs: WindowInfo) -> Bool {
         lhs.windowID == rhs.windowID &&
         lhs.ownerPID == rhs.ownerPID &&
-        NSStringFromRect(lhs.bounds) == NSStringFromRect(rhs.bounds) &&
+        lhs.bounds.origin.x == rhs.bounds.origin.x &&
+        lhs.bounds.origin.y == rhs.bounds.origin.y &&
+        lhs.bounds.size.width == rhs.bounds.size.width &&
+        lhs.bounds.size.height == rhs.bounds.size.height &&
         lhs.layer == rhs.layer &&
         lhs.title == rhs.title &&
         lhs.ownerName == rhs.ownerName &&
@@ -176,7 +181,10 @@ extension WindowInfo: Hashable {
     func hash(into hasher: inout Hasher) {
         hasher.combine(windowID)
         hasher.combine(ownerPID)
-        hasher.combine(NSStringFromRect(bounds))
+        hasher.combine(bounds.origin.x)
+        hasher.combine(bounds.origin.y)
+        hasher.combine(bounds.size.width)
+        hasher.combine(bounds.size.height)
         hasher.combine(layer)
         hasher.combine(title)
         hasher.combine(ownerName)

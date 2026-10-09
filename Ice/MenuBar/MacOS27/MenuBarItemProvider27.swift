@@ -45,6 +45,9 @@ enum MenuBarItemProvider27 {
     nonisolated(unsafe) private static var entries = [CGWindowID: Entry]()
     nonisolated(unsafe) private static var lastOverflowButtonFrame: CGRect?
     nonisolated(unsafe) private static var lastSystemItemFrames = [CGRect]()
+    /// Frames of the drawn items that cannot be hidden, such as the button that stops a screen
+    /// recording. Ice's item cache leaves them out, so hit-testing needs them from here.
+    nonisolated(unsafe) private static var lastUnhideableItemFrames = [CGRect]()
     /// System item frames per display. MenuBarAgent describes the bars of both displays in its
     /// windows, unlike other applications, whose items only have frames on the active one.
     nonisolated(unsafe) private static var lastSystemFramesByDisplay = [CGDirectDisplayID: [CGRect]]()
@@ -61,6 +64,9 @@ enum MenuBarItemProvider27 {
     /// menu bar was active. Hover hit-testing needs it for the display that is not active,
     /// where Accessibility reports no frames at all.
     nonisolated(unsafe) private static var lastLeftEdges = [CGDirectDisplayID: CGFloat]()
+    /// Frames of everything drawn on each display whose menu bar is not active, from
+    /// MenuBarAgent's window there, which holds every item drawn on that bar.
+    nonisolated(unsafe) private static var lastInactiveFramesByDisplay = [CGDirectDisplayID: [CGRect]]()
     /// Processes whose items are concealed. Accessibility keeps reporting their frames where
     /// they were last drawn, so without this they would pass for drawn items.
     nonisolated(unsafe) private static var concealedPIDs = Set<pid_t>()
@@ -127,6 +133,40 @@ enum MenuBarItemProvider27 {
         lock.withLock { lastSystemItemFrames }
     }
 
+    /// Whether Accessibility finds a menu bar item at the given point, whichever process owns it.
+    ///
+    /// The cached frames can miss an item: one that appeared since the last read, or one whose
+    /// owner is not among the workspace's running applications, such as the camera indicator.
+    /// Asking what lies under the point catches every one of them: any item answers with the
+    /// `AXMenuExtra` subrole, and empty bar with the frontmost application's menu bar (measured
+    /// on macOS 27.0, 1–75 ms), so this is for clicks, not mouse moves.
+    static func hasItem(at point: CGPoint) async -> Bool {
+        await Task.detached(priority: .userInitiated) {
+            let systemWide = AXUIElementCreateSystemWide()
+            AXUIElementSetMessagingTimeout(systemWide, 0.25)
+            var element: AXUIElement?
+            guard
+                AXUIElementCopyElementAtPosition(systemWide, Float(point.x), Float(point.y), &element) == .success,
+                let element
+            else {
+                return false
+            }
+            if string(element, kAXSubroleAttribute) == "AXMenuExtra" {
+                return true
+            }
+            // An item can hand back one of its children instead.
+            guard let parent = value(element, kAXParentAttribute) else {
+                return false
+            }
+            return string(parent as! AXUIElement, kAXSubroleAttribute) == "AXMenuExtra"
+        }.value
+    }
+
+    /// Frames of the drawn items that cannot be hidden, from the last read.
+    static func unhideableItemFrames() -> [CGRect] {
+        lock.withLock { lastUnhideableItemFrames }
+    }
+
     /// The Accessibility element of the system item drawn at the given point, from the last
     /// read. Control Centre opens from a press on it without lifting concealment.
     static func systemItem(at point: CGPoint) -> (element: AXUIElement, identifier: String)? {
@@ -178,6 +218,12 @@ enum MenuBarItemProvider27 {
     /// if that bar was not read. Items folded away beside the notch are listed by neither display.
     static func applicationEntryCount(for displayID: CGDirectDisplayID) -> Int? {
         lock.withLock { lastApplicationEntriesByDisplay[displayID] }
+    }
+
+    /// Frames of the items drawn on the given display while its menu bar is not active, from
+    /// the last read. Empty for the display with the active menu bar.
+    static func inactiveDisplayItemFrames(for displayID: CGDirectDisplayID) -> [CGRect] {
+        lock.withLock { lastInactiveFramesByDisplay[displayID] ?? [] }
     }
 
     /// Frame of the system overflow button ("<<" / ">>"), from the last read.
@@ -328,6 +374,21 @@ enum MenuBarItemProvider27 {
                     lastBarFramesByDisplay = framesByDisplay
                     lastApplicationEntriesByDisplay = entriesByDisplay
                 }
+                // On a bar that is not active, MenuBarAgent's window is the only description of
+                // the drawn items, and it is current, so it also gives that bar's left edge.
+                // Ice's own collapsed items report no width and are left out.
+                let inactive = framesByDisplay
+                    .filter { $0.key != activeDisplayID }
+                    .mapValues { $0.filter { $0.width > 4 } }
+                    .filter { !$0.value.isEmpty }
+                lock.withLock {
+                    lastInactiveFramesByDisplay = inactive
+                    for (display, frames) in inactive {
+                        if let edge = frames.map(\.minX).min() {
+                            lastLeftEdges[display] = edge
+                        }
+                    }
+                }
                 let systemFrames = rawItems
                     .filter { $0.bundleID == menuBarAgentBundleID && (activeDisplayBounds?.intersects($0.frame) ?? true) }
                     .map(\.frame)
@@ -374,8 +435,15 @@ enum MenuBarItemProvider27 {
             }
             .map(\.bounds.minX)
             .min()
+        let unhideableFrames = items
+            .filter { item in
+                item.isOnScreen && !item.canBeHidden && item.tag.namespace != .menuBarAgent &&
+                !concealed.contains(item.ownerPID) && item.bounds.width > 4
+            }
+            .map(\.bounds)
         lock.withLock {
             entries = newEntries
+            lastUnhideableItemFrames = unhideableFrames
             lastOverflowButtonFrame = chevronFrame
             lastSystemItemFrames = newEntries.values
                 .filter { $0.bundleID == menuBarAgentBundleID && (activeDisplayBounds?.intersects($0.frame) ?? true) }

@@ -52,9 +52,28 @@ final class MenuBarItemManager: ObservableObject {
     private func configureCancellables(with appState: AppState) {
         var c = Set<AnyCancellable>()
 
-        NSWorkspace.shared.publisher(for: \.runningApplications)
-            .delay(for: 0.25, scheduler: DispatchQueue.main)
-            .discardMerge(Timer.publish(every: 5, on: .main, in: .default).autoconnect())
+        let runningApplications = NSWorkspace.shared.publisher(for: \.runningApplications).replace(with: ())
+        let applicationChanges: AnyPublisher<Void, Never>
+        let sweepInterval: TimeInterval
+        if #available(macOS 27.0, *) {
+            // Reading the items on macOS 27 asks every running process through Accessibility,
+            // which can take seconds, so the periodic sweep is only a safety net. Changes come
+            // from the launches and quits that add and remove items instead, read again a few
+            // seconds later for an application that adds its item only once it has started.
+            applicationChanges = runningApplications
+                .delay(for: 0.25, scheduler: DispatchQueue.main)
+                .merge(with: runningApplications.delay(for: 5, scheduler: DispatchQueue.main))
+                .eraseToAnyPublisher()
+            sweepInterval = 30
+        } else {
+            applicationChanges = runningApplications
+                .delay(for: 0.25, scheduler: DispatchQueue.main)
+                .eraseToAnyPublisher()
+            sweepInterval = 5
+        }
+
+        applicationChanges
+            .discardMerge(Timer.publish(every: sweepInterval, on: .main, in: .default).autoconnect())
             .debounce(for: 1, scheduler: DispatchQueue.main)
             .sink { [weak self] in
                 guard let self else {
@@ -358,6 +377,15 @@ extension MenuBarItemManager {
     /// the hidden and always-hidden sections are correctly ordered,
     /// arranging them into valid positions if needed.
     func cacheItemsRegardless(_ currentItemWindowIDs: [CGWindowID]? = nil) async {
+        await cacheItemsRegardless(currentItemWindowIDs, readItems: nil)
+    }
+
+    /// Caches the given menu bar items, or the current ones if `nil`, regardless of
+    /// whether the items have changed since the previous cache.
+    ///
+    /// On macOS 27 a read asks every running process through Accessibility, so a caller
+    /// that has just read the items passes them in rather than having them read twice.
+    private func cacheItemsRegardless(_ currentItemWindowIDs: [CGWindowID]?, readItems: [MenuBarItem]?) async {
         await cacheActor.runCacheTask { [weak self] in
             guard let self else {
                 return
@@ -369,7 +397,12 @@ extension MenuBarItemManager {
             }
 
             let displayID = Bridging.getActiveMenuBarDisplayID()
-            var items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
+            var items: [MenuBarItem]
+            if let readItems {
+                items = readItems
+            } else {
+                items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
+            }
 
             let itemWindowIDs = currentItemWindowIDs ?? items.reversed().map { $0.windowID }
             await cacheActor.updateCachedItemWindowIDs(itemWindowIDs)
@@ -425,7 +458,7 @@ extension MenuBarItemManager {
             let items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
             let signature = items.map { $0.windowID &+ UInt32(truncatingIfNeeded: Int($0.bounds.minX)) }
             if await cacheActor.cachedItemWindowIDs != signature {
-                await cacheItemsRegardless(signature)
+                await cacheItemsRegardless(signature, readItems: items)
             }
             return
         }
@@ -656,74 +689,82 @@ extension MenuBarItemManager {
         var eventTaps = [EventTap]()
 
         let timeoutTask = Task(timeout: timeout * count) {
-            try await withCheckedThrowingContinuation { continuation in
-                // Listen for the following events at the first location
-                // and perform the following actions:
-                //
-                // - Entry event: Decrement the count and post the real
-                //   event to the second location (handled in EventTap 2).
-                // - Exit event: Resume the continuation.
-                //
-                // These events serve as start (or continue) and stop
-                // signals, and are discarded.
-                let eventTap1 = EventTap(
-                    label: "EventTap 1",
-                    type: .null,
-                    location: firstLocation,
-                    placement: .headInsertEventTap,
-                    option: .defaultTap
-                ) { tap, rEvent in
-                    if rEvent.matches(entryEvent, byIntegerFields: [.eventSourceUserData]) {
-                        count -= 1
-                        event.post(to: secondLocation)
-                        return nil
-                    }
-                    if rEvent.matches(exitEvent, byIntegerFields: [.eventSourceUserData]) {
-                        tap.disable()
-                        continuation.resume()
-                        return nil
-                    }
-                    return rEvent
+            // The taps are disabled however the wait ends, including when it times out.
+            let continuation = EventContinuation()
+            defer {
+                for tap in eventTaps {
+                    tap.disable()
                 }
-
-                // Listen for the real event at the second location and,
-                // depending on the count, post either the entry or exit
-                // event to the first location (handled in EventTap 1).
-                let eventTap2 = EventTap(
-                    label: "EventTap 2",
-                    type: event.type,
-                    location: secondLocation,
-                    placement: .tailAppendEventTap,
-                    option: .listenOnly
-                ) { tap, rEvent in
-                    guard rEvent.matches(event, byIntegerFields: CGEventField.menuBarItemEventFields) else {
+            }
+            try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { checkedContinuation in
+                    guard continuation.install(checkedContinuation) else {
+                        return // Cancelled already.
+                    }
+                    // Listen for the following events at the first location
+                    // and perform the following actions:
+                    //
+                    // - Entry event: Decrement the count and post the real
+                    //   event to the second location (handled in EventTap 2).
+                    // - Exit event: Resume the continuation.
+                    //
+                    // These events serve as start (or continue) and stop
+                    // signals, and are discarded.
+                    let eventTap1 = EventTap(
+                        label: "EventTap 1",
+                        type: .null,
+                        location: firstLocation,
+                        placement: .headInsertEventTap,
+                        option: .defaultTap
+                    ) { tap, rEvent in
+                        if rEvent.matches(entryEvent, byIntegerFields: [.eventSourceUserData]) {
+                            count -= 1
+                            event.post(to: secondLocation)
+                            return nil
+                        }
+                        if rEvent.matches(exitEvent, byIntegerFields: [.eventSourceUserData]) {
+                            tap.disable()
+                            continuation.resume(with: .success(()))
+                            return nil
+                        }
                         return rEvent
                     }
-                    if count <= 0 {
-                        tap.disable()
-                        exitEvent.post(to: firstLocation)
-                    } else {
-                        entryEvent.post(to: firstLocation)
-                    }
-                    rEvent.setTargetPID(pid)
-                    return rEvent
-                }
 
-                // Keep the taps alive.
-                eventTaps.append(eventTap1)
-                eventTaps.append(eventTap2)
-
-                Task {
-                    await withTaskCancellationHandler {
-                        eventTap1.enable()
-                        eventTap2.enable()
-                        entryEvent.post(to: firstLocation)
-                    } onCancel: {
-                        eventTap1.disable()
-                        eventTap2.disable()
-                        continuation.resume(throwing: CancellationError())
+                    // Listen for the real event at the second location and,
+                    // depending on the count, post either the entry or exit
+                    // event to the first location (handled in EventTap 1).
+                    let eventTap2 = EventTap(
+                        label: "EventTap 2",
+                        type: event.type,
+                        location: secondLocation,
+                        placement: .tailAppendEventTap,
+                        option: .listenOnly
+                    ) { tap, rEvent in
+                        guard rEvent.matches(event, byIntegerFields: CGEventField.menuBarItemEventFields) else {
+                            return rEvent
+                        }
+                        if count <= 0 {
+                            tap.disable()
+                            exitEvent.post(to: firstLocation)
+                        } else {
+                            entryEvent.post(to: firstLocation)
+                        }
+                        rEvent.setTargetPID(pid)
+                        return rEvent
                     }
+
+                    // Keep the taps alive.
+                    eventTaps.append(eventTap1)
+                    eventTaps.append(eventTap2)
+
+                    eventTap1.enable()
+                    eventTap2.enable()
+                    entryEvent.post(to: firstLocation)
                 }
+            } onCancel: {
+                // Reached when the timeout cancels the wait: the handler used to sit in a task
+                // of its own, which the timeout never cancelled, so the wait never ended.
+                continuation.resume(throwing: CancellationError())
             }
         }
         do {
@@ -775,98 +816,104 @@ extension MenuBarItemManager {
         var eventTaps = [EventTap]()
 
         let timeoutTask = Task(timeout: timeout * count) {
-            try await withCheckedThrowingContinuation { continuation in
-                // Listen for the following events at the first location
-                // and perform the following actions:
-                //
-                // - Entry event: Decrement the count and post the real
-                //   event to the second location (handled in EventTap 2).
-                // - Exit event: Resume the continuation.
-                //
-                // These events serve as start (or continue) and stop
-                // signals, and are discarded.
-                let eventTap1 = EventTap(
-                    label: "EventTap 1",
-                    type: .null,
-                    location: firstLocation,
-                    placement: .headInsertEventTap,
-                    option: .defaultTap
-                ) { tap, rEvent in
-                    if rEvent.matches(entryEvent, byIntegerFields: [.eventSourceUserData]) {
-                        count -= 1
-                        event.post(to: secondLocation)
-                        return nil
-                    }
-                    if rEvent.matches(exitEvent, byIntegerFields: [.eventSourceUserData]) {
-                        tap.disable()
-                        continuation.resume()
-                        return nil
-                    }
-                    return rEvent
+            // The taps are disabled however the wait ends, including when it times out.
+            let continuation = EventContinuation()
+            defer {
+                for tap in eventTaps {
+                    tap.disable()
                 }
-
-                // Listen for the real event at the second location and
-                // post the real event to the first location (handled in
-                // EventTap 3).
-                let eventTap2 = EventTap(
-                    label: "EventTap 2",
-                    type: event.type,
-                    location: secondLocation,
-                    placement: .tailAppendEventTap,
-                    option: .listenOnly
-                ) { tap, rEvent in
-                    guard rEvent.matches(event, byIntegerFields: CGEventField.menuBarItemEventFields) else {
+            }
+            try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { checkedContinuation in
+                    guard continuation.install(checkedContinuation) else {
+                        return // Cancelled already.
+                    }
+                    // Listen for the following events at the first location
+                    // and perform the following actions:
+                    //
+                    // - Entry event: Decrement the count and post the real
+                    //   event to the second location (handled in EventTap 2).
+                    // - Exit event: Resume the continuation.
+                    //
+                    // These events serve as start (or continue) and stop
+                    // signals, and are discarded.
+                    let eventTap1 = EventTap(
+                        label: "EventTap 1",
+                        type: .null,
+                        location: firstLocation,
+                        placement: .headInsertEventTap,
+                        option: .defaultTap
+                    ) { tap, rEvent in
+                        if rEvent.matches(entryEvent, byIntegerFields: [.eventSourceUserData]) {
+                            count -= 1
+                            event.post(to: secondLocation)
+                            return nil
+                        }
+                        if rEvent.matches(exitEvent, byIntegerFields: [.eventSourceUserData]) {
+                            tap.disable()
+                            continuation.resume(with: .success(()))
+                            return nil
+                        }
                         return rEvent
                     }
-                    if count <= 0 {
-                        tap.disable()
-                    }
-                    event.post(to: firstLocation)
-                    rEvent.setTargetPID(pid)
-                    return rEvent
-                }
 
-                // Listen for the real event at the first location and,
-                // depending on the count, post either the entry or exit
-                // event to the first location (handled in EventTap 1).
-                let eventTap3 = EventTap(
-                    label: "EventTap 3",
-                    type: event.type,
-                    location: firstLocation,
-                    placement: .headInsertEventTap,
-                    option: .listenOnly
-                ) { tap, rEvent in
-                    guard rEvent.matches(event, byIntegerFields: CGEventField.menuBarItemEventFields) else {
+                    // Listen for the real event at the second location and
+                    // post the real event to the first location (handled in
+                    // EventTap 3).
+                    let eventTap2 = EventTap(
+                        label: "EventTap 2",
+                        type: event.type,
+                        location: secondLocation,
+                        placement: .tailAppendEventTap,
+                        option: .listenOnly
+                    ) { tap, rEvent in
+                        guard rEvent.matches(event, byIntegerFields: CGEventField.menuBarItemEventFields) else {
+                            return rEvent
+                        }
+                        if count <= 0 {
+                            tap.disable()
+                        }
+                        event.post(to: firstLocation)
+                        rEvent.setTargetPID(pid)
                         return rEvent
                     }
-                    if count <= 0 {
-                        tap.disable()
-                        exitEvent.post(to: firstLocation)
-                    } else {
-                        entryEvent.post(to: firstLocation)
-                    }
-                    rEvent.setTargetPID(pid)
-                    return rEvent
-                }
 
-                // Keep the taps alive.
-                eventTaps.append(eventTap1)
-                eventTaps.append(eventTap2)
-                eventTaps.append(eventTap3)
-
-                Task {
-                    await withTaskCancellationHandler {
-                        eventTap1.enable()
-                        eventTap2.enable()
-                        eventTap3.enable()
-                        entryEvent.post(to: firstLocation)
-                    } onCancel: {
-                        eventTap1.disable()
-                        eventTap2.disable()
-                        eventTap3.disable()
-                        continuation.resume(throwing: CancellationError())
+                    // Listen for the real event at the first location and,
+                    // depending on the count, post either the entry or exit
+                    // event to the first location (handled in EventTap 1).
+                    let eventTap3 = EventTap(
+                        label: "EventTap 3",
+                        type: event.type,
+                        location: firstLocation,
+                        placement: .headInsertEventTap,
+                        option: .listenOnly
+                    ) { tap, rEvent in
+                        guard rEvent.matches(event, byIntegerFields: CGEventField.menuBarItemEventFields) else {
+                            return rEvent
+                        }
+                        if count <= 0 {
+                            tap.disable()
+                            exitEvent.post(to: firstLocation)
+                        } else {
+                            entryEvent.post(to: firstLocation)
+                        }
+                        rEvent.setTargetPID(pid)
+                        return rEvent
                     }
+
+                    // Keep the taps alive.
+                    eventTaps.append(eventTap1)
+                    eventTaps.append(eventTap2)
+                    eventTaps.append(eventTap3)
+
+                    eventTap1.enable()
+                    eventTap2.enable()
+                    eventTap3.enable()
+                    entryEvent.post(to: firstLocation)
                 }
+            } onCancel: {
+                // See `postEventWithBarrier`.
+                continuation.resume(throwing: CancellationError())
             }
         }
         do {
@@ -1010,13 +1057,18 @@ extension MenuBarItemManager {
         defer {
             MouseHelpers.showCursor()
         }
+        // Already detached, so the bounds are read here rather than through a detached task
+        // per check, and a short pause between checks keeps the loop from spinning a core.
         let responseTask = Task.detached {
             while true {
                 try Task.checkCancellation()
-                let origin = try await self.getCurrentBounds(for: item).origin
-                if origin != initialOrigin {
-                    return origin
+                guard let bounds = Bridging.getWindowBounds(for: item.windowID) else {
+                    throw EventError.missingItemBounds(item)
                 }
+                if bounds.origin != initialOrigin {
+                    return bounds.origin
+                }
+                try await Task.sleep(for: .milliseconds(5))
             }
         }
         let timeoutTask = Task(timeout: timeout) {
@@ -1140,6 +1192,10 @@ extension MenuBarItemManager {
     ///   - item: The menu bar item to move.
     ///   - destination: The destination to move the item to.
     func move(item: MenuBarItem, to destination: MoveDestination) async throws {
+        if #available(macOS 27.0, *) {
+            // macOS 27 ignores the drag events a move is made of.
+            throw EventError.cannotComplete
+        }
         guard item.isMovable else {
             throw EventError.itemNotMovable(item)
         }
@@ -1429,6 +1485,11 @@ extension MenuBarItemManager {
     func temporarilyShow(item: MenuBarItem, clickingWith mouseButton: CGMouseButton) async {
         guard let appState else {
             logger.error("Missing AppState, so not showing \(item.logString, privacy: .public)")
+            return
+        }
+        if #available(macOS 27.0, *) {
+            // Moving an item into view is not possible on macOS 27; use ItemClicker27.
+            logger.error("Cannot temporarily show \(item.logString, privacy: .public) on macOS 27")
             return
         }
         guard let screen = NSScreen.screenWithActiveMenuBar else {
@@ -1894,6 +1955,48 @@ private extension CGEvent {
         if case .click(let subtype) = type {
             setIntegerValueField(.mouseEventClickState, value: subtype.clickState)
         }
+    }
+}
+
+// MARK: - EventContinuation
+
+/// A continuation for an event operation that is resumed once, by whichever of the
+/// event taps or the cancellation of the operation comes first.
+private final class EventContinuation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Void, any Error>?
+    private var isResolved = false
+
+    /// Stores the continuation, or resumes it at once if the operation was cancelled
+    /// before it was stored. Returns whether the operation should go ahead.
+    func install(_ continuation: CheckedContinuation<Void, any Error>) -> Bool {
+        let isResolved = lock.withLock {
+            if !self.isResolved {
+                self.continuation = continuation
+            }
+            return self.isResolved
+        }
+        if isResolved {
+            continuation.resume(throwing: CancellationError())
+        }
+        return !isResolved
+    }
+
+    /// Resumes the continuation, unless it was resumed before.
+    func resume(with result: Result<Void, any Error>) {
+        let continuation = lock.withLock {
+            guard !isResolved else {
+                return CheckedContinuation<Void, any Error>?.none
+            }
+            isResolved = true
+            return self.continuation.take()
+        }
+        continuation?.resume(with: result)
+    }
+
+    /// Resumes the continuation by throwing the given error, unless it was resumed before.
+    func resume(throwing error: any Error) {
+        resume(with: .failure(error))
     }
 }
 

@@ -165,7 +165,7 @@ private final class MenuBarSearchHostingView: NSHostingView<AnyView> {
         panel: MenuBarSearchPanel
     ) {
         super.init(
-            rootView: MenuBarSearchContentView { [weak panel] in panel?.close() }
+            rootView: MenuBarSearchContentView(displayID: displayID) { [weak panel] in panel?.close() }
                 .environmentObject(appState)
                 .environmentObject(appState.itemManager)
                 .environmentObject(appState.imageCache)
@@ -192,6 +192,7 @@ private struct MenuBarSearchContentView: View {
     @EnvironmentObject var model: MenuBarSearchModel
     @FocusState private var searchFieldIsFocused: Bool
 
+    let displayID: CGDirectDisplayID
     let closePanel: () -> Void
 
     private var hasItems: Bool {
@@ -377,6 +378,12 @@ private struct MenuBarSearchContentView: View {
         closePanel()
         Task {
             try await Task.sleep(for: .milliseconds(25))
+            // Ice cannot move an item into view on macOS 27, so the item is clicked
+            // the way the Ice Bar clicks it.
+            if #available(macOS 27.0, *), let appState = itemManager.appState {
+                await ItemClicker27.click(item: item, mouseButton: .left, iceBarDisplayID: displayID, appState: appState)
+                return
+            }
             if Bridging.isWindowOnScreen(item.windowID) {
                 try await itemManager.click(item: item, with: .left)
             } else {
@@ -404,6 +411,10 @@ private struct ShowItemButton: View {
     let item: MenuBarItem
     let action: () -> Void
 
+    /// Checked when the item changes, rather than on every render, as the
+    /// button is rendered again on every keystroke in the search field.
+    @State private var isItemOnScreen = false
+
     private var backgroundShape: some InsettableShape {
         if #available(macOS 26.0, *) {
             RoundedRectangle(cornerRadius: 5, style: .continuous)
@@ -415,7 +426,7 @@ private struct ShowItemButton: View {
     var body: some View {
         Button(action: action) {
             HStack {
-                Text("\(Bridging.isWindowOnScreen(item.windowID) ? "Click" : "Show") Item")
+                Text("\(isItemOnScreen ? "Click" : "Show") Item")
                     .padding(.leading, 5)
 
                 Image(systemName: "return")
@@ -433,6 +444,9 @@ private struct ShowItemButton: View {
                             .opacity(0.5)
                     }
             }
+        }
+        .onChange(of: item.windowID, initial: true) {
+            isItemOnScreen = Bridging.isWindowOnScreen(item.windowID)
         }
     }
 }
@@ -487,15 +501,11 @@ private struct MenuBarSearchItemView: View {
     private var itemImage: NSImage {
         guard
             let cached = imageCache.images[item.tag],
-            let trimmed = cached.cgImage.trimmingTransparency(around: [.minXEdge, .maxXEdge])
+            let trimmed = model.trimmedImage(for: item.tag, from: cached)
         else {
             return NSImage()
         }
-        let size = CGSize(
-            width: CGFloat(trimmed.width) / cached.scale,
-            height: CGFloat(trimmed.height) / cached.scale
-        )
-        return NSImage(cgImage: trimmed, size: size)
+        return trimmed
     }
 
     private var appIcon: NSImage? {

@@ -94,6 +94,12 @@ final class MenuBarItemImageCache: ObservableObject {
     /// Storage for internal observers.
     private var cancellables = Set<AnyCancellable>()
 
+    /// The update started by the observers, while it runs.
+    @MainActor private var updateTask: Task<Void, Never>?
+
+    /// Whether the observers asked for an update while one was running.
+    @MainActor private var needsAnotherUpdate = false
+
     // MARK: Setup
 
     /// Sets up the cache.
@@ -109,9 +115,19 @@ final class MenuBarItemImageCache: ObservableObject {
         var c = Set<AnyCancellable>()
 
         if let appState {
+            // On macOS 27 an update captures the display and reads every application's items
+            // twice through Accessibility, so the timer only keeps changing glyphs current.
+            // Opening the Ice Bar, search or the layout, and changes to the items, still
+            // update at once.
+            let interval: TimeInterval
+            if #available(macOS 27.0, *) {
+                interval = 10
+            } else {
+                interval = 3
+            }
             Publishers.Merge3(
-                // Update every 3 seconds at minimum.
-                Timer.publish(every: 3, on: .main, in: .default).autoconnect().replace(with: ()),
+                // Update every few seconds at minimum.
+                Timer.publish(every: interval, on: .main, in: .default).autoconnect().replace(with: ()),
 
                 // Update when the active space or screen parameters change.
                 Publishers.Merge(
@@ -128,17 +144,36 @@ final class MenuBarItemImageCache: ObservableObject {
             )
             .throttle(for: 0.5, scheduler: DispatchQueue.main, latest: false)
             .sink { [weak self] in
-                guard let self else {
-                    return
-                }
-                Task {
-                    await self.updateCache()
-                }
+                self?.scheduleUpdate()
             }
             .store(in: &c)
         }
 
         cancellables = c
+    }
+
+    /// Updates the cache, unless an update is already under way, in which case one more
+    /// follows it.
+    ///
+    /// A capture can block for good (see ``captureQueue``), and a task per tick behind it
+    /// piled up without end.
+    @MainActor
+    private func scheduleUpdate() {
+        guard updateTask == nil else {
+            needsAnotherUpdate = true
+            return
+        }
+        updateTask = Task { [weak self] in
+            await self?.updateCache()
+            guard let self else {
+                return
+            }
+            updateTask = nil
+            if needsAnotherUpdate {
+                needsAnotherUpdate = false
+                scheduleUpdate()
+            }
+        }
     }
 
     // MARK: Capturing Images
@@ -320,9 +355,7 @@ final class MenuBarItemImageCache: ObservableObject {
                     newImages[item.tag] = image
                 }
             }
-            await MainActor.run { [newImages] in
-                images.merge(newImages) { (_, new) in new }
-            }
+            await mergeImages(newImages)
             return
         }
 
@@ -351,9 +384,23 @@ final class MenuBarItemImageCache: ObservableObject {
             newImages.merge(sectionImages) { (_, new) in new }
         }
 
-        await MainActor.run { [newImages] in
-            images.merge(newImages) { (_, new) in new }
+        await mergeImages(newImages)
+    }
+
+    /// Adds the given images to the cache, and drops those of items that are no longer
+    /// in the item cache.
+    ///
+    /// Only sections on display are captured, so images are otherwise only ever added,
+    /// and those of every item that ever came and went were kept for good. Items that
+    /// are hidden or off screen stay in the item cache, so their images are kept.
+    @MainActor
+    private func mergeImages(_ newImages: [MenuBarItemTag: CapturedImage]) {
+        var merged = images.merging(newImages) { (_, new) in new }
+        if let items = appState?.itemManager.itemCache.managedItems, !items.isEmpty {
+            let tags = Set(items.map(\.tag))
+            merged = merged.filter { tags.contains($0.key) }
         }
+        images = merged
     }
 
     /// Updates the cache for the given sections, if necessary.

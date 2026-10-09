@@ -76,6 +76,17 @@ final class LayoutBarItemView: NSView {
             setAccessibilityLabel(item.displayName)
         }
         self.isEnabled = item.isMovable
+        if #available(macOS 27.0, *), !item.isControlItem {
+            // macOS 27 hides whole applications by bundle identifier, and always keeps
+            // the system items, so anything else cannot change section.
+            if !item.canBeHidden {
+                self.isEnabled = false
+                self.toolTip = "\(item.displayName) — macOS always shows this item"
+            } else if item.sourceApplication?.bundleIdentifier == nil {
+                self.isEnabled = false
+                self.toolTip = "\(item.displayName) — cannot be hidden on this version of macOS"
+            }
+        }
 
         configureCancellables()
     }
@@ -89,12 +100,14 @@ final class LayoutBarItemView: NSView {
         var c = Set<AnyCancellable>()
 
         if let appState {
+            // Only resize and redraw when this item's image actually changes.
             appState.imageCache.$images
-                .sink { [weak self] images in
-                    guard let self, let cachedImage = images[item.tag] else {
-                        return
-                    }
-                    self.cachedImage = cachedImage
+                .compactMap { [tag = item.tag] images in
+                    images[tag]
+                }
+                .removeDuplicates { $0.cgImage === $1.cgImage && $0.scale == $1.scale }
+                .sink { [weak self] cachedImage in
+                    self?.cachedImage = cachedImage
                 }
                 .store(in: &c)
         }

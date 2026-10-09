@@ -54,14 +54,23 @@ final class Concealer27: ObservableObject {
             logger.error("MenuBarClientCore assertions are unavailable, so items will not be hidden")
             return
         }
-        let workspaceCenter = NSWorkspace.shared.notificationCenter
-        for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
-            observers.append(workspaceCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+        // Every assertion is an allowlist of the applications running when it was made, so an
+        // application missing from it has its items hidden. The workspace's launch notification
+        // is never posted for agents (`LSUIElement`), which is what most menu bar applications
+        // are, including the ones macOS starts on demand for recording and screen sharing: their
+        // items stayed hidden until something else happened to update the concealment. The
+        // running applications are observed instead, which covers agents as well.
+        NSWorkspace.shared.publisher(for: \.runningApplications)
+            .map { Set($0.compactMap(\.bundleIdentifier)) }
+            .removeDuplicates()
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
                 MainActor.assumeIsolated {
                     self?.update()
                 }
-            })
-        }
+            }
+            .store(in: &cancellables)
         // Plugging a display in lays both bars out again, and whatever does not fit beside the
         // notch is folded away — the state the check below watches for. Nothing else here notices
         // a display arriving, so without this the check waits for the next concealment change,
@@ -166,9 +175,18 @@ final class Concealer27: ObservableObject {
             return application.processIdentifier
         })
         lastChangeAt = .now
+        updateGeneration += 1
+        let generation = updateGeneration
         let previous = applyTask
-        let task = Task { [controller, logger] in
+        let task = Task { [weak self, controller, logger] in
             await previous?.value
+            // Applies follow one another, so a burst of updates queued one apply behind the
+            // other, each laying the bar out again. Only the latest target is worth applying,
+            // as it comes later in the queue. Releases are never skipped, so applies and
+            // releases still land in the order they were asked for.
+            guard let self, updateGeneration == generation else {
+                return
+            }
             do {
                 try await controller.apply(target: target, running: running)
             } catch {
@@ -178,12 +196,16 @@ final class Concealer27: ObservableObject {
         applyTask = task
         // Concealing moves the remaining items, and hover hit-testing uses their cached
         // frames. The refresh stays out of `applyTask`, so a slow read never holds up the
-        // next change. The bar animates for about 250 ms (measured).
+        // next change. The bar animates for about 250 ms (measured). Only the refresh after
+        // the latest update runs, as each one reads every application's items.
         Task { [weak self] in
             await task.value
             try? await Task.sleep(for: .milliseconds(400))
-            await self?.appState?.itemManager.cacheItemsIfNeeded()
-            await self?.checkStuckOverflow()
+            guard let self, updateGeneration == generation else {
+                return
+            }
+            await self.appState?.itemManager.cacheItemsIfNeeded()
+            await self.checkStuckOverflow()
         }
     }
 
@@ -344,6 +366,9 @@ final class Concealer27: ObservableObject {
             }
         }
     }
+
+    /// Counts the updates made, so an update overtaken by a later one is skipped.
+    private var updateGeneration = 0
 
     /// Releases every assertion for a moment, so a click can reach a system item.
     func suspend(for duration: Duration) {
@@ -602,6 +627,7 @@ final class Concealer27: ObservableObject {
     func cacheFromSavedLayout(items: [MenuBarItem], displayID: CGDirectDisplayID?) -> MenuBarItemManager.ItemCache {
         var cache = MenuBarItemManager.ItemCache(displayID: displayID)
         let layout = savedLayout
+        let bundleIDs = MenuBarItem.sourceBundleIDs(of: items)
         for item in items.sorted(by: { $0.bounds.minX < $1.bounds.minX }) where item.canBeHidden && !item.isSystemClone {
             if item.isControlItem {
                 if item.tag == .visibleControlItem {
@@ -609,7 +635,7 @@ final class Concealer27: ObservableObject {
                 }
                 continue
             }
-            switch layout[item.sourceApplication?.bundleIdentifier ?? ""] ?? .visible {
+            switch layout[item.sourcePID.flatMap { bundleIDs[$0] } ?? ""] ?? .visible {
             case .visible: cache[.visible].append(item)
             case .hidden: cache[.hidden].append(item)
             case .alwaysHidden: cache[.alwaysHidden].append(item)
