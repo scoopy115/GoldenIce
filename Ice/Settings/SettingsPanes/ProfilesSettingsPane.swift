@@ -38,7 +38,7 @@ private struct ProfilesSettingsPane27: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Profiles")
                         .font(.headline)
-                    Text("Save how your menu bar is arranged — which apps are hidden and which show while in front — and switch between arrangements, by hand, with a hotkey, or when a display comes and goes. While a profile is active, changes you make in Menu Bar Layout and Rules are saved to it.")
+                    Text("Save how your menu bar is arranged — which apps are visible and which are hidden — and switch between arrangements, by hand, with a hotkey, or when a display comes and goes. While a profile is active, changes you make in Menu Bar Layout are saved to it. Rules apply to every profile.")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

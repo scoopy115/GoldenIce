@@ -172,6 +172,7 @@ extension Defaults {
         case showCaptureIndicator = "ShowCaptureIndicator"
         case captureIndicatorPlacement = "CaptureIndicatorPlacement"
         case macOS27ShowWhenFrontmost = "MacOS27ShowWhenFrontmost"
+        case macOS27KnownBlocked = "MacOS27KnownBlocked"
         case showOverflowInIceBar = "ShowOverflowInIceBar"
         case layoutProfiles = "LayoutProfiles"
         case activeLayoutProfile = "ActiveLayoutProfile"

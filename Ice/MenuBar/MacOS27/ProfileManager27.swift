@@ -8,8 +8,10 @@ import Combine
 import OSLog
 import UniformTypeIdentifiers
 
-/// A named arrangement of the menu bar: which section each application is in, and which
-/// applications are shown while they are in front.
+/// A named arrangement of the menu bar: which section each application is in.
+///
+/// The "show while in front" rules are not part of a profile; they apply whichever is active.
+/// `showWhenFrontmost` is kept only so profiles saved by earlier builds still read.
 struct LayoutProfile: Codable, Identifiable, Equatable {
     /// When a profile switches in by itself.
     enum Trigger: String, Codable, CaseIterable {
@@ -148,7 +150,7 @@ final class ProfileManager27: ObservableObject {
         let profile = LayoutProfile(
             name: name,
             layout: concealer.layoutSnapshot.mapValues(\.rawValue),
-            showWhenFrontmost: concealer.showWhenFrontmost.sorted()
+            showWhenFrontmost: []
         )
         profiles.append(profile)
         activeProfileID = profile.id
@@ -163,7 +165,6 @@ final class ProfileManager27: ObservableObject {
             return
         }
         profiles[index].layout = concealer.layoutSnapshot.mapValues(\.rawValue)
-        profiles[index].showWhenFrontmost = concealer.showWhenFrontmost.sorted()
         persist()
     }
 
@@ -231,7 +232,7 @@ final class ProfileManager27: ObservableObject {
         } else {
             activeProfileID = nil
             persist()
-            concealer.applySnapshot(layout: previous.layout, showWhenFrontmost: previous.rules)
+            concealer.applyLayout(previous.layout)
         }
     }
 
@@ -275,7 +276,7 @@ final class ProfileManager27: ObservableObject {
             return
         }
         logger.notice("Applying profile \(profile.name, privacy: .public)")
-        concealer.applySnapshot(layout: profile.sections, showWhenFrontmost: Set(profile.showWhenFrontmost))
+        concealer.applyLayout(profile.sections)
         activeProfileID = profile.id
         persist()
     }

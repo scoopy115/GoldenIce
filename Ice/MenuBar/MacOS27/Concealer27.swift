@@ -57,15 +57,6 @@ final class Concealer27: ObservableObject {
         }
         Defaults.set(showWhenFrontmost.sorted(), forKey: .macOS27ShowWhenFrontmost)
         update()
-        appState?.profileManager27.activeLayoutDidChange()
-    }
-
-    /// The applications in the hidden sections of the saved layout, for the rules editor.
-    var hiddenApplications: [(bundleID: String, section: MacOS27Section)] {
-        savedLayout
-            .filter { $0.value != .visible }
-            .map { (bundleID: $0.key, section: $0.value) }
-            .sorted { $0.bundleID < $1.bundleID }
     }
 
     /// Moves Ice's icon out of the system overflow when it lands there.
@@ -633,12 +624,20 @@ final class Concealer27: ObservableObject {
         savedLayout
     }
 
-    /// Replaces the saved layout and the rules at once, as a profile or a backup does.
-    func applySnapshot(layout: [String: MacOS27Section], showWhenFrontmost: Set<String>) {
+    /// Replaces the saved layout, as switching profiles does. The rules are not part of a
+    /// profile and stay as they are.
+    func applyLayout(_ layout: [String: MacOS27Section]) {
+        applySnapshot(layout: layout, showWhenFrontmost: nil)
+    }
+
+    /// Replaces the saved layout, and the rules if given, as restoring a backup does.
+    func applySnapshot(layout: [String: MacOS27Section], showWhenFrontmost: Set<String>?) {
         Defaults.set(layout.mapValues(\.rawValue), forKey: .macOS27Layout)
         Defaults.set(true, forKey: .macOS27LayoutSeeded)
-        self.showWhenFrontmost = showWhenFrontmost
-        Defaults.set(showWhenFrontmost.sorted(), forKey: .macOS27ShowWhenFrontmost)
+        if let showWhenFrontmost {
+            self.showWhenFrontmost = showWhenFrontmost
+            Defaults.set(showWhenFrontmost.sorted(), forKey: .macOS27ShowWhenFrontmost)
+        }
         update()
         Task { [weak self] in
             await self?.appState?.itemManager.cacheItemsRegardless()
@@ -748,7 +747,7 @@ final class Concealer27: ObservableObject {
                 }
                 continue
             }
-            if Self.isParkedOffEveryBar(item) {
+            if let bundleID = item.sourcePID.flatMap({ bundleIDs[$0] }), isBlockedBySystem(item, bundleID: bundleID) {
                 // macOS never draws this item, whatever its section: its application is
                 // switched off in System Settings > Menu Bar. It is listed on its own rather than
                 // in a section, where it would only look like an item Ice failed to show or hide.
@@ -765,6 +764,35 @@ final class Concealer27: ObservableObject {
             disabledItems = disabled
         }
         return cache
+    }
+
+    /// Applications seen with their items parked off the bar while Ice was not concealing them.
+    ///
+    /// A parked item is not enough on its own: an application Ice conceals from launch has its
+    /// items parked too, as they were never drawn. Only an application seen parked while Ice let
+    /// it through is blocked by System Settings, and it stays known as blocked while concealed,
+    /// until its items are seen on the bar again.
+    private var knownBlocked = Set(Defaults.array(forKey: .macOS27KnownBlocked) as? [String] ?? []) {
+        didSet {
+            if knownBlocked != oldValue {
+                Defaults.set(knownBlocked.sorted(), forKey: .macOS27KnownBlocked)
+            }
+        }
+    }
+
+    private func isBlockedBySystem(_ item: MenuBarItem, bundleID: String) -> Bool {
+        let isParked = Self.isParkedOffEveryBar(item)
+        let isConcealed = concealedPIDs.contains(item.ownerPID)
+        // Right after a change, an item let through may still be parked, and one concealed may
+        // still be drawn: only a settled bar says anything about System Settings.
+        if !isConcealed, ContinuousClock.now >= lastChangeAt + .seconds(2) {
+            if isParked {
+                knownBlocked.insert(bundleID)
+            } else if item.bounds.width > 1 {
+                knownBlocked.remove(bundleID)
+            }
+        }
+        return isParked && (!isConcealed || knownBlocked.contains(bundleID))
     }
 
     /// Items macOS never draws because their applications are switched off in System Settings >
