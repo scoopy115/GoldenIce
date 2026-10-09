@@ -17,11 +17,6 @@ struct AboutSettingsPane: View {
 
     private var contributeURL: URL {
         // swiftlint:disable:next force_unwrapping
-        URL(string: "https://github.com/scoopy115/GoldenIce")!
-    }
-
-    private var upstreamURL: URL {
-        // swiftlint:disable:next force_unwrapping
         URL(string: "https://github.com/jordanbaird/Ice")!
     }
 
@@ -86,23 +81,20 @@ struct AboutSettingsPane: View {
                     Image(nsImage: nsImage)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
-                        .frame(width: 180)
-                        .shadow(color: GoldenIceBrand.gold.opacity(0.35), radius: 18, y: 6)
+                        .frame(width: 230)
                 }
 
-                VStack(alignment: .leading, spacing: 6) {
-                    GoldenIceWordmark(size: 56)
+                VStack(alignment: .leading) {
+                    Text("Ice")
+                        .font(.system(size: 80))
+                        .foregroundStyle(.primary)
 
                     Text("Version \(Constants.versionString)")
                         .font(.system(size: 15))
                         .foregroundStyle(.secondary)
 
-                    Text("Built on Ice by Jordan Baird, carried into macOS 27.")
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
-
                     Text(Constants.copyrightString)
-                        .font(.system(size: 12))
+                        .font(.system(size: 14))
                         .foregroundStyle(.secondary.opacity(0.67))
                 }
                 .fontWeight(.medium)
@@ -153,23 +145,20 @@ struct AboutSettingsPane: View {
     @ViewBuilder
     private func bottomBar(containerShape: some InsettableShape) -> some View {
         HStack {
-            Button("Quit") {
+            Button("Quit Ice") {
                 NSApp.terminate(nil)
             }
             Spacer()
-            Button("Credits") {
+            Button("Acknowledgements") {
                 NSWorkspace.shared.open(acknowledgementsURL)
             }
-            Button("GitHub") {
+            Button("Contribute") {
                 openURL(contributeURL)
             }
             Button("Report a Bug") {
                 openURL(issuesURL)
             }
-            Button("Original Ice") {
-                openURL(upstreamURL)
-            }
-            Button("Support", systemImage: "heart.circle.fill") {
+            Button("Support Ice", systemImage: "heart.circle.fill") {
                 openURL(donateURL)
             }
         }
