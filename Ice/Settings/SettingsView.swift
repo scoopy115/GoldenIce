@@ -133,6 +133,8 @@ struct SettingsView: View {
             GeneralSettingsPane(settings: appState.settings.general)
         case .menuBarLayout:
             MenuBarLayoutSettingsPane(itemManager: appState.itemManager)
+        case .rules:
+            RulesSettingsPane()
         case .menuBarAppearance:
             MenuBarAppearanceSettingsPane(appearanceManager: appState.appearanceManager)
         case .hotkeys:

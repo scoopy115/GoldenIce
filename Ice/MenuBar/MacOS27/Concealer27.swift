@@ -43,6 +43,30 @@ final class Concealer27: ObservableObject {
     /// layout says. ``IconPlacer27`` uses it to give Ice's own icon room to be drawn.
     var isolatedAllowlist: Set<String>?
 
+    /// Applications whose items are shown while they are frontmost, whatever their section.
+    @Published private(set) var showWhenFrontmost: Set<String> = Set(
+        Defaults.array(forKey: .macOS27ShowWhenFrontmost) as? [String] ?? []
+    )
+
+    /// Turns the "show while frontmost" rule on or off for an application.
+    func setShowWhenFrontmost(_ isOn: Bool, for bundleID: String) {
+        if isOn {
+            showWhenFrontmost.insert(bundleID)
+        } else {
+            showWhenFrontmost.remove(bundleID)
+        }
+        Defaults.set(showWhenFrontmost.sorted(), forKey: .macOS27ShowWhenFrontmost)
+        update()
+    }
+
+    /// The applications in the hidden sections of the saved layout, for the rules editor.
+    var hiddenApplications: [(bundleID: String, section: MacOS27Section)] {
+        savedLayout
+            .filter { $0.value != .visible }
+            .map { (bundleID: $0.key, section: $0.value) }
+            .sorted { $0.bundleID < $1.bundleID }
+    }
+
     /// Moves Ice's icon out of the system overflow when it lands there.
     private(set) lazy var iconPlacer = IconPlacer27(concealer: self)
 
@@ -149,6 +173,19 @@ final class Concealer27: ObservableObject {
                 }
             }
             .store(in: &cancellables)
+        // Applications with the "show while frontmost" rule come and go as they activate.
+        NSWorkspace.shared.notificationCenter
+            .publisher(for: NSWorkspace.didActivateApplicationNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, !self.showWhenFrontmost.isEmpty else {
+                        return
+                    }
+                    self.update()
+                }
+            }
+            .store(in: &cancellables)
         appState.captureIndicatorPanel27.performSetup(watcher: appState.captureWatcher27)
         update()
         Task { [weak self] in
@@ -175,10 +212,19 @@ final class Concealer27: ObservableObject {
             target = concealed.isEmpty ? [] : [concealed]
         } else {
             let layout = SectionLayout27.effectiveLayout(observed: [:], saved: savedLayout, running: running)
+            // An application with the "show while frontmost" rule is let through while it is
+            // the active one, as if shown for a moment.
+            var shown = Set(temporarilyShown.keys)
+            if
+                let frontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+                showWhenFrontmost.contains(frontmost)
+            {
+                shown.insert(frontmost)
+            }
             target = ConcealmentPlanner27.concealedSets(
                 layout: layout,
                 state: revealState(appState),
-                temporarilyShown: Set(temporarilyShown.keys)
+                temporarilyShown: shown
             )
         }
         let concealed = ConcealmentPlanner27.effectivelyConcealed(sets: target)
