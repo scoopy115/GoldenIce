@@ -21,19 +21,36 @@ DERIVED="${DERIVED:-/tmp/ice-build}"
 # build to the next, while an ad-hoc signature changes with every build and the permissions have to
 # be granted again. The team is the certificate's OU, not the name in brackets after it.
 # Set DEVELOPMENT_TEAM to choose one yourself; leave it unset to be asked nothing.
+#
+# A Developer ID certificate is preferred over an Apple Development one: on macOS 27, MenuBarAgent
+# removes the status items of apps that are not Developer ID (or App Store) signed while an
+# assessment-mode assertion is live, and Ice holds one whenever it hides anything — so a build
+# signed for development loses its own icon exactly when it is needed.
 TEAM="${DEVELOPMENT_TEAM:-}"
-if [ -z "$TEAM" ] && security find-identity -v -p codesigning 2>/dev/null | grep -q "Apple Development"; then
-    TEAM="$(security find-certificate -c "Apple Development" -p 2>/dev/null \
-        | openssl x509 -noout -subject 2>/dev/null \
-        | sed -n 's/.*OU *= *\([A-Z0-9]*\).*/\1/p' | head -1)"
-fi
+IDENTITY=""
+for KIND in "Developer ID Application" "Apple Development"; do
+    if [ -z "$IDENTITY" ] && security find-identity -v -p codesigning 2>/dev/null | grep -q "$KIND"; then
+        IDENTITY="$KIND"
+        if [ -z "$TEAM" ]; then
+            TEAM="$(security find-certificate -c "$KIND" -p 2>/dev/null \
+                | openssl x509 -noout -subject 2>/dev/null \
+                | sed -n 's/.*OU *= *\([A-Z0-9]*\).*/\1/p' | head -1)"
+        fi
+    fi
+done
 
 # The hardened runtime is off whichever way this goes. With an ad-hoc signature it refuses to load
 # Sparkle, which carries a team of its own — "mapping process and mapped file (non-platform) have
 # different Team IDs" — while `codesign --verify --deep --strict` passes all the same, so the
 # script used to install a bundle that could not launch (jordanbaird/Ice#1006, @Theralley). A copy
 # installed from here is run by its builder rather than distributed, so it gives up nothing it needs.
-if [ -n "$TEAM" ]; then
+if [ -n "$TEAM" ] && [ "$IDENTITY" = "Developer ID Application" ]; then
+    echo "==> Building, signed with Developer ID by team $TEAM"
+    SIGNING=(
+        DEVELOPMENT_TEAM="$TEAM" CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$IDENTITY"
+        PROVISIONING_PROFILE_SPECIFIER= OTHER_CODE_SIGN_FLAGS=--timestamp
+    )
+elif [ -n "$TEAM" ]; then
     echo "==> Building, signed by team $TEAM"
     SIGNING=(DEVELOPMENT_TEAM="$TEAM" CODE_SIGN_STYLE=Automatic)
 else
