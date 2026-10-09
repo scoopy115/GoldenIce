@@ -23,9 +23,15 @@ enum ItemClicker27 {
     private static let logger = Logger(category: "ItemClicker27")
 
     static func click(item: MenuBarItem, mouseButton: CGMouseButton, iceBarDisplayID: CGDirectDisplayID?, appState: AppState) async {
-        guard let bundleID = item.sourceApplication?.bundleIdentifier else {
-            logger.error("No application for \(item.logString, privacy: .public)")
+        // On macOS 27 an item's namespace is its application's bundle identifier, which still
+        // holds when the process the item was read from can no longer be looked up.
+        let namespaceBundleID: String? = if case .string(let string) = item.tag.namespace { string } else { nil }
+        guard let bundleID = item.sourceApplication?.bundleIdentifier ?? namespaceBundleID else {
+            logger.error("No application for \(item.logString, privacy: .public), pid \(item.sourcePID ?? -1, privacy: .public)")
             return
+        }
+        if item.sourceApplication == nil {
+            logger.notice("No running application for pid \(item.sourcePID ?? -1, privacy: .public) of \(item.logString, privacy: .public); using \(bundleID, privacy: .public)")
         }
 
         if
