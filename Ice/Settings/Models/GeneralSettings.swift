@@ -84,6 +84,12 @@ final class GeneralSettings: ObservableObject {
 
     /// Loads the model's initial state.
     private func loadInitialState() {
+        if #available(macOS 27.0, *), NSScreen.screens.contains(where: \.hasNotch) {
+            // A notched bar on macOS 27 is usually full, and MenuBarAgent folds whatever does
+            // not fit into its own overflow. Hidden items revealed on the bar land straight back
+            // in there, so the Ice Bar, which draws them in its own panel, is the default.
+            useIceBar = true
+        }
         Defaults.ifPresent(key: .showIceIcon, assign: &showIceIcon)
         Defaults.ifPresent(key: .customIceIconIsTemplate, assign: &customIceIconIsTemplate)
         Defaults.ifPresent(key: .useIceBar, assign: &useIceBar)
