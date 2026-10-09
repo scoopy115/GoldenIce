@@ -50,6 +50,15 @@ enum Reorderer27 {
             isReordering = false
         }
 
+        // Without moving the pointer first, through MenuBarAgent's position table, if Ice may.
+        if Defaults.object(forKey: .reorderWithoutPointer) as? Bool ?? true, PositionTable27.hasAccess {
+            if await moveThroughTable(item, section: section, appState: appState) {
+                await appState.itemManager.cacheItemsRegardless()
+                return
+            }
+            logger.notice("The position table did not move \(item.logString, privacy: .public); dragging instead")
+        }
+
         logger.notice("Moving \(item.logString, privacy: .public) \(after ? "after" : "before", privacy: .public) \(neighbour.logString, privacy: .public)")
 
         let sectionBundleIDs = section.compactMap { $0.sourceApplication?.bundleIdentifier }
@@ -116,6 +125,71 @@ enum Reorderer27 {
         concealer.update()
         try? await Task.sleep(for: settle)
         await appState.itemManager.cacheItemsRegardless()
+    }
+
+    /// Moves an item by giving it a weight between its new neighbours in MenuBarAgent's table,
+    /// then waits for the bar to show it there. Returns whether that worked.
+    private static func moveThroughTable(_ item: MenuBarItem, section: [MenuBarItem], appState: AppState) async -> Bool {
+        guard
+            let table = PositionTable27.read(),
+            let itemKey = PositionTable27.entryKey(for: item, in: table),
+            let index = section.firstIndex(where: { $0.tag == item.tag })
+        else {
+            return false
+        }
+        func weight(_ neighbour: MenuBarItem) -> Int? {
+            PositionTable27.entryKey(for: neighbour, in: table).flatMap { table[$0] }
+        }
+        // The nearest neighbours on either side that the table knows.
+        let left = section[..<index].reversed().lazy.compactMap(weight).first
+        let right = section[(index + 1)...].lazy.compactMap(weight).first
+
+        let items = await MenuBarItemProvider27.items()
+        let samples = items.compactMap { drawn -> (weight: Int, x: Double)? in
+            guard BarDrag27.isDrawn(drawn), let weight = weight(drawn) else {
+                return nil
+            }
+            return (weight, Double(drawn.bounds.minX))
+        }
+        let higherIsLeft = PositionWeights27.higherIsLeft(samples: samples) ?? true
+
+        if let current = table[itemKey], PositionWeights27.isInPlace(current, left: left, right: right, higherIsLeft: higherIsLeft) {
+            return true
+        }
+        guard
+            let newWeight = PositionWeights27.weight(left: left, right: right, higherIsLeft: higherIsLeft, taken: Set(table.values)),
+            PositionTable27.write(weight: newWeight, forKey: itemKey)
+        else {
+            return false
+        }
+        logger.notice("Wrote weight \(newWeight, privacy: .public) for \(itemKey, privacy: .public)")
+        // Let cfprefsd hand the change on before MenuBarAgent is nudged into a layout.
+        try? await Task.sleep(for: .milliseconds(50))
+        await appState.menuBarManager.section(withName: .visible)?.controlItem.nudgeLayout()
+
+        // A concealed item cannot be seen moving; the write is all there is to go by.
+        guard let current = items.first(where: { $0.tag == item.tag }), BarDrag27.isDrawn(current) else {
+            return true
+        }
+        let neighbours = section.filter { $0.tag != item.tag }
+        for _ in 0..<12 {
+            try? await Task.sleep(for: .milliseconds(250))
+            let fresh = await MenuBarItemProvider27.items()
+            guard let moved = fresh.first(where: { $0.tag == item.tag }) else {
+                continue
+            }
+            let drawnNeighbours = neighbours.compactMap { neighbour in
+                fresh.first { $0.tag == neighbour.tag && BarDrag27.isDrawn($0) }
+            }
+            let leftNeighbour = section[..<index].reversed().lazy.compactMap { n in drawnNeighbours.first { $0.tag == n.tag } }.first
+            let rightNeighbour = section[(index + 1)...].lazy.compactMap { n in drawnNeighbours.first { $0.tag == n.tag } }.first
+            let leftOK = leftNeighbour.map { moved.bounds.minX > $0.bounds.minX } ?? true
+            let rightOK = rightNeighbour.map { moved.bounds.minX < $0.bounds.minX } ?? true
+            if leftOK && rightOK {
+                return true
+            }
+        }
+        return false
     }
 
     /// Whether `item` already sits on the requested side of `target`.

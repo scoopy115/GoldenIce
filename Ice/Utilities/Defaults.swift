@@ -175,6 +175,8 @@ extension Defaults {
         case showOverflowInIceBar = "ShowOverflowInIceBar"
         case layoutProfiles = "LayoutProfiles"
         case activeLayoutProfile = "ActiveLayoutProfile"
+        case positionTableBookmark = "PositionTableBookmark"
+        case reorderWithoutPointer = "ReorderWithoutPointer"
         case macOS27MenuReach = "MacOS27MenuReach"
         case macOS27MenuOwner = "MacOS27MenuOwner"
         case macOS27ClickRestoreDelay = "MacOS27ClickRestoreDelay"

@@ -49,6 +49,9 @@ struct AdvancedSettingsPane: View {
                 IceSection("Menu Bar Indicators") {
                     showCaptureIndicator
                 }
+                IceSection("Arranging") {
+                    ReorderWithoutPointerSetting()
+                }
             }
             IceSection("Permissions") {
                 allPermissions
@@ -193,6 +196,43 @@ struct AdvancedSettingsPane: View {
                 Text(permission.title)
             }
             .frame(height: 22)
+        }
+    }
+}
+
+/// The switch for reordering through MenuBarAgent's position table, with what it needs.
+@available(macOS 27.0, *)
+private struct ReorderWithoutPointerSetting: View {
+    @State private var isOn = Defaults.object(forKey: .reorderWithoutPointer) as? Bool ?? true
+    @State private var hasAccess = PositionTable27.hasAccess
+
+    var body: some View {
+        Toggle(isOn: $isOn) {
+            Text("Reorder without moving the pointer")
+            Text("Ice writes the new order straight into macOS's own menu bar table, so your pointer stays put and hidden items don't flash. When that fails, Ice drags the item instead.")
+        }
+        .onChange(of: isOn) { _, newValue in
+            Defaults.set(newValue, forKey: .reorderWithoutPointer)
+        }
+        if isOn {
+            HStack(spacing: 8) {
+                Image(systemName: hasAccess ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(hasAccess ? .green : .orange)
+                Text(hasAccess ? "Ice can read the menu bar table." : "Ice needs access to the menu bar table.")
+                    .font(.system(size: 12))
+                Spacer()
+                if !hasAccess {
+                    Button("Choose File…") {
+                        hasAccess = PositionTable27.requestAccess()
+                    }
+                    Button("Full Disk Access…") {
+                        PositionTable27.openFullDiskAccessSettings()
+                    }
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                hasAccess = PositionTable27.hasAccess
+            }
         }
     }
 }

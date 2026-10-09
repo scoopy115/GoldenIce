@@ -180,6 +180,19 @@ final class ControlItem {
         self.identifier = identifier
     }
 
+    /// Changes the item's width for a moment, so MenuBarAgent lays the bar out again.
+    ///
+    /// MenuBarAgent does not act on a change to its position table made by another process
+    /// until a status item's layout is invalidated (as Thaw found on macOS 27). Half a point for
+    /// a frame is enough, and too little to see.
+    func nudgeLayout() async {
+        let baseline = statusItem.length
+        let width = statusItem.button?.frame.width ?? 0
+        statusItem.length = baseline == NSStatusItem.variableLength ? width + 0.5 : baseline + 0.5
+        try? await Task.sleep(for: .milliseconds(16))
+        statusItem.length = baseline
+    }
+
     /// Performs the initial setup of the control item.
     func performSetup(with appState: AppState) {
         self.appState = appState
