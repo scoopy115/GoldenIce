@@ -47,6 +47,48 @@ enum SectionLayout27 {
         }
     }
 
+    /// Bundle identifiers that never take a section from another menu bar manager: the system
+    /// items macOS keeps on the bar itself, and the managers' own dividers.
+    static let foreignLayoutExclusions: Set<String> = [
+        "com.apple.MenuBarAgent",
+        "com.apple.controlcenter",
+        "com.stonerl.Thaw",
+        "com.jordanbaird.Ice",
+    ]
+
+    /// The sections of each application, taken from Thaw's saved section order.
+    ///
+    /// Thaw, a fork of Ice that many users moved to while Ice did not run on macOS 27, keeps its
+    /// sections as lists of `bundleIdentifier:title` keys under `visible`, `hidden` and
+    /// `alwaysHidden`. Someone switching back expects the same items to stay hidden, and the bar
+    /// itself cannot say which those were: macOS 27 folds whatever does not fit, and Thaw's
+    /// dividers are gone with it.
+    ///
+    /// Returns `nil` when the order holds no application at all.
+    static func layout(fromThawSectionOrder order: [String: [String]]) -> [String: MacOS27Section]? {
+        let sections: [(key: String, section: MacOS27Section)] = [
+            ("visible", .visible),
+            ("hidden", .hidden),
+            ("alwaysHidden", .alwaysHidden),
+        ]
+        var items = [(bundleID: String, section: MacOS27Section)]()
+        for (key, section) in sections {
+            for identifier in order[key] ?? [] {
+                guard
+                    let separator = identifier.firstIndex(of: ":"),
+                    case let bundleID = String(identifier[..<separator]),
+                    !bundleID.isEmpty,
+                    !foreignLayoutExclusions.contains(bundleID)
+                else {
+                    continue
+                }
+                items.append((bundleID, section))
+            }
+        }
+        let layout = appSections(items: items)
+        return layout.isEmpty ? nil : layout
+    }
+
     /// The sections the bar itself held before macOS 27, read once from the order of its items.
     ///
     /// Until macOS 27 an item's section *was* its place on the bar, between Ice's dividers, and

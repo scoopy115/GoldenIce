@@ -606,9 +606,14 @@ final class Concealer27: ObservableObject {
         guard
             !Defaults.bool(forKey: .macOS27LayoutSeeded),
             savedLayout.isEmpty,
-            !isConcealing,
-            let hiddenControlItem = items.first(where: { $0.tag == .hiddenControlItem })
+            !isConcealing
         else {
+            return
+        }
+        if seedLayoutFromThaw() {
+            return
+        }
+        guard let hiddenControlItem = items.first(where: { $0.tag == .hiddenControlItem }) else {
             return
         }
         // Once the bar can be read, this runs whatever it says: a bar that says nothing is still
@@ -641,6 +646,28 @@ final class Concealer27: ObservableObject {
             .joined(separator: " ")
         logger.notice("Took the macOS 27 layout from the order on the bar: \(described, privacy: .public)")
         update()
+    }
+
+    /// Takes the macOS 27 layout from Thaw's sections, if Thaw has any, and returns whether it did.
+    ///
+    /// See ``SectionLayout27/layout(fromThawSectionOrder:)``.
+    private func seedLayoutFromThaw() -> Bool {
+        guard
+            let thaw = UserDefaults(suiteName: "com.stonerl.Thaw"),
+            let order = thaw.dictionary(forKey: "MenuBarItemManager.savedSectionOrder") as? [String: [String]],
+            let layout = SectionLayout27.layout(fromThawSectionOrder: order)
+        else {
+            return false
+        }
+        Defaults.set(true, forKey: .macOS27LayoutSeeded)
+        Defaults.set(layout.mapValues(\.rawValue), forKey: .macOS27Layout)
+        let described = layout
+            .sorted { $0.key < $1.key }
+            .map { "\($0.key)=\($0.value.rawValue)" }
+            .joined(separator: " ")
+        logger.notice("Took the macOS 27 layout from Thaw's sections: \(described, privacy: .public)")
+        update()
+        return true
     }
 
     /// Builds the item cache from the saved layout rather than the order on the bar.

@@ -125,3 +125,38 @@ struct SeededLayout27Tests {
         #expect(SectionLayout27.seededLayout(items: [], hiddenControlItem: hiddenDivider, alwaysHiddenControlItem: nil) == nil)
     }
 }
+
+@Suite("Layout from Thaw")
+struct ThawLayout27Tests {
+    @Test("Thaw's sections become per-application sections")
+    func importsSections() {
+        let layout = SectionLayout27.layout(fromThawSectionOrder: [
+            "visible": ["com.apphousekitchen.aldente-pro:Item-0", "com.apple.MenuBarAgent:com.apple.menuextra.clock"],
+            "hidden": ["com.raycast.macos:Item-0", "com.silverseahog.ParallelSpaces: 1", "com.stonerl.Thaw:Thaw.ControlItem.Hidden"],
+            "alwaysHidden": ["ru.keepcoder.Telegram:Item-0"],
+        ])
+        #expect(layout == [
+            "com.apphousekitchen.aldente-pro": .visible,
+            "com.raycast.macos": .hidden,
+            "com.silverseahog.ParallelSpaces": .hidden,
+            "ru.keepcoder.Telegram": .alwaysHidden,
+        ])
+    }
+
+    @Test("An application with items in two sections stays visible")
+    func mostVisibleWins() {
+        let layout = SectionLayout27.layout(fromThawSectionOrder: [
+            "visible": ["org.mozilla.firefox:Item-1"],
+            "hidden": ["org.mozilla.firefox:Item-0"],
+        ])
+        #expect(layout == ["org.mozilla.firefox": .visible])
+    }
+
+    @Test("An order with only system items says nothing")
+    func nothingToImport() {
+        let layout = SectionLayout27.layout(fromThawSectionOrder: [
+            "visible": ["com.apple.MenuBarAgent:com.apple.menuextra.wifi", "com.stonerl.Thaw:Thaw.ControlItem.Visible"],
+        ])
+        #expect(layout == nil)
+    }
+}
