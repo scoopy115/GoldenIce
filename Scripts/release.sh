@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Builds a GoldenIce release: a Developer ID signed, notarized Ice.app in a zip, plus a
+# Builds a GoldenIce release: a Developer ID signed, notarized GoldenIce.app in a zip, plus a
 # Sparkle appcast entry signed with GoldenIce's own update key. Nothing is uploaded; the
 # printed steps say what to publish where. See docs/RELEASING.md.
 #
@@ -32,7 +32,7 @@ xcodebuild -project "$ROOT/Ice.xcodeproj" -scheme Ice -configuration Release \
     PROVISIONING_PROFILE_SPECIFIER= OTHER_CODE_SIGN_FLAGS=--timestamp ENABLE_HARDENED_RUNTIME=YES \
     | tail -1
 
-APP="$DERIVED/Build/Products/Release/Ice.app"
+APP="$DERIVED/Build/Products/Release/GoldenIce.app"
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP/Contents/Info.plist")"
 BUILD="$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$APP/Contents/Info.plist")"
 mkdir -p "$OUT"

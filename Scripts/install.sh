@@ -70,7 +70,7 @@ xcodebuild -project "$ROOT/Ice.xcodeproj" -scheme Ice -configuration Release \
     ENABLE_HARDENED_RUNTIME=NO "${SIGNING[@]}" \
     | tail -3
 
-APP="$DERIVED/Build/Products/Release/Ice.app"
+APP="$DERIVED/Build/Products/Release/GoldenIce.app"
 [ -d "$APP" ] || { echo "error: no product at $APP" >&2; exit 1; }
 
 echo "==> Verifying the signature before installing"
@@ -79,22 +79,32 @@ codesign --verify --deep --strict "$APP"
 codesign -dv "$APP" 2>&1 | grep -E 'Identifier=|TeamIdentifier=' | sed 's/^/    /'
 
 echo "==> Installing to $DEST"
-if pgrep -x Ice >/dev/null 2>&1; then
-    osascript -e 'quit app "Ice"' >/dev/null 2>&1 || true
-    for _ in 1 2 3 4 5 6 7 8 9 10; do
-        pgrep -x Ice >/dev/null 2>&1 || break
-        sleep 0.3
-    done
-    pgrep -x Ice >/dev/null 2>&1 && pkill -x Ice || true
-fi
+# Earlier builds were called Ice; both names share the bundle identifier.
+for NAME in GoldenIce Ice; do
+    if pgrep -x "$NAME" >/dev/null 2>&1; then
+        osascript -e "quit app \"$NAME\"" >/dev/null 2>&1 || true
+        for _ in 1 2 3 4 5 6 7 8 9 10; do
+            pgrep -x "$NAME" >/dev/null 2>&1 || break
+            sleep 0.3
+        done
+        pgrep -x "$NAME" >/dev/null 2>&1 && pkill -x "$NAME" || true
+    fi
+done
 
 mkdir -p "$DEST"
-rm -rf "${DEST:?}/Ice.app"
+rm -rf "${DEST:?}/GoldenIce.app"
 # ditto, not cp: it preserves the code signature.
-ditto "$APP" "$DEST/Ice.app"
+ditto "$APP" "$DEST/GoldenIce.app"
+
+# A copy installed under the old name has the same bundle identifier, which confuses Launch
+# Services. It goes to the Trash rather than being deleted, in case it is wanted back.
+if [ -d "$DEST/Ice.app" ]; then
+    echo "==> Moving the old Ice.app to the Trash"
+    osascript -e "tell application \"Finder\" to delete (POSIX file \"$DEST/Ice.app\")" >/dev/null 2>&1 || true
+fi
 
 echo "==> Verifying the installed copy"
-codesign --verify --deep --strict "$DEST/Ice.app"
+codesign --verify --deep --strict "$DEST/GoldenIce.app"
 
-open ${OPEN_ARGS:-} -a "$DEST/Ice.app"
-echo "==> Running from $DEST/Ice.app"
+open ${OPEN_ARGS:-} -a "$DEST/GoldenIce.app"
+echo "==> Running from $DEST/GoldenIce.app"

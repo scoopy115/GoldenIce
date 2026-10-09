@@ -150,7 +150,7 @@ enum PositionTable27 {
             owners.append(executable)
         }
         if item.isControlItem {
-            owners.append("Ice")
+            owners.append(ProcessInfo.processInfo.processName)
         }
         for owner in owners {
             let candidate = "status:\(owner)::\(item.tag.title)"

@@ -62,7 +62,7 @@ struct PermissionsView: View {
     private var explanationBox: some View {
         IceSection {
             VStack {
-                Text("Ice needs your permission to manage the menu bar.")
+                Text("GoldenIce needs your permission to manage the menu bar.")
                     .fontWeight(.medium)
                 Text("Absolutely no personal information is collected or stored.")
                     .bold()
@@ -135,7 +135,7 @@ struct PermissionsView: View {
                     .underline()
 
                 VStack(spacing: 2) {
-                    Text("Ice needs this to:")
+                    Text("GoldenIce needs this to:")
                         .font(.title3)
                         .bold()
 

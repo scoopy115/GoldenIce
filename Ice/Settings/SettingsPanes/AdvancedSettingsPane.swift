@@ -63,7 +63,7 @@ struct AdvancedSettingsPane: View {
     private var showCaptureIndicator: some View {
         Toggle(isOn: $settings.showCaptureIndicator) {
             Text("Show a camera and microphone indicator")
-            Text("macOS draws none of its own while Ice is hiding items. Click Ice's to open Control Centre.")
+            Text("macOS draws none of its own while GoldenIce is hiding items. Click GoldenIce's to open Control Centre.")
         }
         if settings.showCaptureIndicator {
             Picker(selection: $settings.captureIndicatorPlacement) {
@@ -209,7 +209,7 @@ private struct ReorderWithoutPointerSetting: View {
     var body: some View {
         Toggle(isOn: $isOn) {
             Text("Reorder without moving the pointer")
-            Text("Ice writes the new order straight into macOS's own menu bar table, so your pointer stays put and hidden items don't flash. When that fails, Ice drags the item instead.")
+            Text("GoldenIce writes the new order straight into macOS's own menu bar table, so your pointer stays put and hidden items don't flash. When that fails, GoldenIce drags the item instead.")
         }
         .onChange(of: isOn) { _, newValue in
             Defaults.set(newValue, forKey: .reorderWithoutPointer)
@@ -218,7 +218,7 @@ private struct ReorderWithoutPointerSetting: View {
             HStack(spacing: 8) {
                 Image(systemName: hasAccess ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                     .foregroundStyle(hasAccess ? .green : .orange)
-                Text(hasAccess ? "Ice can read the menu bar table." : "Ice needs access to the menu bar table.")
+                Text(hasAccess ? "GoldenIce can read the menu bar table." : "GoldenIce needs access to the menu bar table.")
                     .font(.system(size: 12))
                 Spacer()
                 if !hasAccess {

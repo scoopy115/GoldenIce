@@ -48,7 +48,7 @@ struct MenuBarLayoutSettingsPane: View {
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.secondary)
                 if #available(macOS 27.0, *), !MenuBarAssessmentAssertion27.isAvailable {
-                    Text("Ice cannot hide items on this version of macOS: the system interface it relies on is missing.")
+                    Text("GoldenIce cannot hide items on this version of macOS: the system interface it relies on is missing.")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(.red)
                         .multilineTextAlignment(.center)
@@ -77,7 +77,7 @@ struct MenuBarLayoutSettingsPane: View {
 
     @ViewBuilder
     private var cannotArrange: some View {
-        Text("Ice cannot arrange menu bar items in automatically hidden menu bars.")
+        Text("GoldenIce cannot arrange menu bar items in automatically hidden menu bars.")
             .font(.title3)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
@@ -228,7 +228,7 @@ private struct StuckOverflowWarning: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Some items are folded away on the built-in display.")
                             .font(.headline)
-                        Text("macOS stopped laying them out when Ice freed the space beside the notch, and left no control to reach them. Relaunching the application whose item is missing brings it back.")
+                        Text("macOS stopped laying them out when GoldenIce freed the space beside the notch, and left no control to reach them. Relaunching the application whose item is missing brings it back.")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
