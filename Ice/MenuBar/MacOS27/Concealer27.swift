@@ -683,6 +683,12 @@ final class Concealer27: ObservableObject {
                 continue
             }
             switch layout[item.sourcePID.flatMap { bundleIDs[$0] } ?? ""] ?? .visible {
+            case .visible where Self.isParkedOffEveryBar(item):
+                // macOS never draws this item: its application is switched off in System
+                // Settings > Menu Bar, or there was no room for it when it was created. On the
+                // bar it cannot be reached at all, so it is listed with the hidden items, where
+                // the Ice Bar can still open it through Accessibility.
+                cache[.hidden].append(item)
             case .visible: cache[.visible].append(item)
             case .hidden: cache[.hidden].append(item)
             case .alwaysHidden: cache[.alwaysHidden].append(item)
@@ -691,14 +697,33 @@ final class Concealer27: ObservableObject {
         return cache
     }
 
+    /// Whether MenuBarAgent has parked the item below every display rather than drawing it.
+    ///
+    /// Measured on macOS 27.0.1: items of applications switched off in System Settings >
+    /// Menu Bar report a frame just below the screen (y 970–986 on a 982 pt display), as do
+    /// items created when the bar had no room. Concealed items keep the frame they were last
+    /// drawn at, and folded ones stack against the overflow button, so neither is caught.
+    private static func isParkedOffEveryBar(_ item: MenuBarItem) -> Bool {
+        guard item.bounds.width > 1 else {
+            return false
+        }
+        // The parked frame still overlaps the bottom edge of the screen, so it is the strip
+        // along the top, where a drawn item always is, that tells them apart.
+        return !NSScreen.screens.contains { screen in
+            let display = CGDisplayBounds(screen.displayID)
+            let barStrip = CGRect(x: display.minX, y: display.minY, width: display.width, height: 60)
+            return barStrip.intersects(item.bounds)
+        }
+    }
+
     // MARK: Private
 
     private func revealState(_ appState: AppState) -> RevealState27 {
-        let navigation = appState.navigationState
-        if navigation.isSettingsPresented, navigation.settingsNavigationIdentifier == .menuBarLayout {
-            // Everything is drawn while the layout window is open, so every item can be photographed.
-            return .allRevealed
-        }
+        // The layout window used to reveal everything, so every item could be photographed.
+        // But then an item dragged into the hidden section stayed on the bar for as long as the
+        // window was open, which is exactly when the user looks to see it go, and the layout
+        // seemed not to work at all. Concealment follows the layout there too; items with no
+        // photograph show their application's icon instead.
         if appState.settings.general.useIceBar {
             // The Ice Bar shows hidden items in its own panel, so the bar stays concealed.
             return .allHidden
