@@ -118,6 +118,22 @@ final class ProfileManager27: ObservableObject {
         persist()
     }
 
+    /// Keeps the active profile in step with the layout and the rules, as they are edited.
+    ///
+    /// A profile is edited by switching to it and arranging the menu bar as usual, so every
+    /// change made while it is active belongs to it.
+    func activeLayoutDidChange() {
+        guard let activeProfileID, let profile = profiles.first(where: { $0.id == activeProfileID }) else {
+            return
+        }
+        updateFromCurrent(profile)
+    }
+
+    /// The active profile, if one is.
+    var activeProfile: LayoutProfile? {
+        profiles.first { $0.id == activeProfileID }
+    }
+
     /// Switches to a profile.
     func apply(_ profile: LayoutProfile) {
         guard let concealer = appState?.concealer27 else {

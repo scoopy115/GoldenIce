@@ -57,6 +57,7 @@ final class Concealer27: ObservableObject {
         }
         Defaults.set(showWhenFrontmost.sorted(), forKey: .macOS27ShowWhenFrontmost)
         update()
+        appState?.profileManager27.activeLayoutDidChange()
     }
 
     /// The applications in the hidden sections of the saved layout, for the rules editor.
@@ -649,6 +650,7 @@ final class Concealer27: ObservableObject {
         let updated = SectionLayout27.settingSection(section, for: bundleID, in: savedLayout)
         Defaults.set(updated.mapValues(\.rawValue), forKey: .macOS27Layout)
         update()
+        appState?.profileManager27.activeLayoutDidChange()
         Task { [weak self] in
             await self?.appState?.itemManager.cacheItemsRegardless()
         }

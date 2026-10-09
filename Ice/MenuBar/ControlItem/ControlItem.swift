@@ -592,6 +592,26 @@ final class ControlItem {
 
         menu.addItem(.separator())
 
+        if #available(macOS 27.0, *), !appState.profileManager27.profiles.isEmpty {
+            let manager = appState.profileManager27
+            let header = NSMenuItem(title: "Profiles", action: nil, keyEquivalent: "")
+            header.isEnabled = false
+            menu.addItem(header)
+            for profile in manager.profiles {
+                let item = NSMenuItem(
+                    title: profile.name,
+                    action: #selector(applyProfile(for:)),
+                    keyEquivalent: ""
+                )
+                item.target = self
+                item.representedObject = profile.id
+                item.state = profile.id == manager.activeProfileID ? .on : .off
+                item.indentationLevel = 1
+                menu.addItem(item)
+            }
+            menu.addItem(.separator())
+        }
+
         let checkForUpdatesItem = NSMenuItem(
             title: "Check for Updates…",
             action: #selector(checkForUpdates),
@@ -628,6 +648,19 @@ final class ControlItem {
             return
         }
         section.toggle()
+    }
+
+    /// Switches to the layout profile of the given menu item.
+    @objc private func applyProfile(for menuItem: NSMenuItem) {
+        guard
+            #available(macOS 27.0, *),
+            let id = menuItem.representedObject as? UUID,
+            let manager = appState?.profileManager27,
+            let profile = manager.profiles.first(where: { $0.id == id })
+        else {
+            return
+        }
+        manager.apply(profile)
     }
 
     /// Opens the menu bar search panel.
