@@ -63,6 +63,20 @@ final class AppState: ObservableObject {
         return concealer
     }
 
+    /// Storage for ``profileManager27``, typed loosely so the property exists on every macOS.
+    private var profileManager27Storage: AnyObject?
+
+    /// Keeps layout profiles and backups on macOS 27.
+    @available(macOS 27.0, *)
+    var profileManager27: ProfileManager27 {
+        if let manager = profileManager27Storage as? ProfileManager27 {
+            return manager
+        }
+        let manager = ProfileManager27()
+        profileManager27Storage = manager
+        return manager
+    }
+
     /// Storage for ``captureWatcher27``, typed loosely so the property exists on every macOS.
     private var captureWatcher27Storage: AnyObject?
 
@@ -132,6 +146,7 @@ final class AppState: ObservableObject {
             // Hiding does not need the item cache, and the first read of the items can
             // take seconds (measured 9 s), so it starts before the item manager's setup.
             concealer27.performSetup(with: self)
+            profileManager27.performSetup(with: self)
         }
         await itemManager.performSetup(with: self)
         imageCache.performSetup(with: self)

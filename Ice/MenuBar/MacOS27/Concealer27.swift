@@ -627,6 +627,23 @@ final class Concealer27: ObservableObject {
         }
     }
 
+    /// The saved layout, by bundle identifier, for profiles and backups.
+    var layoutSnapshot: [String: MacOS27Section] {
+        savedLayout
+    }
+
+    /// Replaces the saved layout and the rules at once, as a profile or a backup does.
+    func applySnapshot(layout: [String: MacOS27Section], showWhenFrontmost: Set<String>) {
+        Defaults.set(layout.mapValues(\.rawValue), forKey: .macOS27Layout)
+        Defaults.set(true, forKey: .macOS27LayoutSeeded)
+        self.showWhenFrontmost = showWhenFrontmost
+        Defaults.set(showWhenFrontmost.sorted(), forKey: .macOS27ShowWhenFrontmost)
+        update()
+        Task { [weak self] in
+            await self?.appState?.itemManager.cacheItemsRegardless()
+        }
+    }
+
     /// Moves an application to a section of the saved layout and applies it.
     func setSection(_ section: MacOS27Section, for bundleID: String) {
         let updated = SectionLayout27.settingSection(section, for: bundleID, in: savedLayout)
