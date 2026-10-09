@@ -42,6 +42,9 @@ final class AdvancedSettings: ObservableObject {
     /// spare it, so without this there is nothing on the bar to say the camera is on (macOS 27).
     @Published var showCaptureIndicator = true
 
+    /// Where Ice's camera and microphone indicator goes on the menu bar (macOS 27).
+    @Published var captureIndicatorPlacement: CaptureIndicatorPlacement = .trailing
+
     /// Storage for internal observers.
     private var cancellables = Set<AnyCancellable>()
 
@@ -63,6 +66,11 @@ final class AdvancedSettings: ObservableObject {
         Defaults.ifPresent(key: .enableSecondaryContextMenu, assign: &enableSecondaryContextMenu)
         Defaults.ifPresent(key: .showOnHoverDelay, assign: &showOnHoverDelay)
         Defaults.ifPresent(key: .showCaptureIndicator, assign: &showCaptureIndicator)
+        Defaults.ifPresent(key: .captureIndicatorPlacement) { rawValue in
+            if let placement = CaptureIndicatorPlacement(rawValue: rawValue) {
+                captureIndicatorPlacement = placement
+            }
+        }
         Defaults.ifPresent(key: .tempShowInterval, assign: &tempShowInterval)
 
         Defaults.ifPresent(key: .sectionDividerStyle) { rawValue in
@@ -126,6 +134,13 @@ final class AdvancedSettings: ObservableObject {
             }
             .store(in: &c)
 
+        $captureIndicatorPlacement
+            .receive(on: DispatchQueue.main)
+            .sink { placement in
+                Defaults.set(placement.rawValue, forKey: .captureIndicatorPlacement)
+            }
+            .store(in: &c)
+
         // Slider values change continuously while dragging.
         $tempShowInterval
             .debounce(for: 0.3, scheduler: DispatchQueue.main)
@@ -164,6 +179,28 @@ enum SectionDividerStyle: Int, CaseIterable, Identifiable {
         switch self {
         case .noDivider: "None"
         case .chevron: "Chevron"
+        }
+    }
+}
+
+// MARK: - CaptureIndicatorPlacement
+
+/// Where Ice's camera and microphone indicator goes on the menu bar.
+enum CaptureIndicatorPlacement: Int, CaseIterable, Identifiable {
+    /// Beside the system items at the right end of the bar.
+    case trailing = 0
+    /// Left of the other items.
+    case leading = 1
+    /// Wherever the user Command-drags it; macOS remembers the spot.
+    case custom = 2
+
+    var id: Int { rawValue }
+
+    var localized: LocalizedStringKey {
+        switch self {
+        case .trailing: "Far right"
+        case .leading: "Left of the items"
+        case .custom: "Where I drag it"
         }
     }
 }

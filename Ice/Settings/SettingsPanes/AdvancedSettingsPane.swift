@@ -62,6 +62,16 @@ struct AdvancedSettingsPane: View {
             Text("Show a camera and microphone indicator")
             Text("macOS draws none of its own while Ice is hiding items. Click Ice's to open Control Centre.")
         }
+        if settings.showCaptureIndicator {
+            Picker(selection: $settings.captureIndicatorPlacement) {
+                ForEach(CaptureIndicatorPlacement.allCases) { placement in
+                    Text(placement.localized).tag(placement)
+                }
+            } label: {
+                Text("Position")
+                Text("It is a real menu bar item: you can also ⌘ Command + drag it.")
+            }
+        }
     }
 
     @ViewBuilder

@@ -170,6 +170,7 @@ extension Defaults {
         case macOS27Layout = "MacOS27Layout"
         case macOS27LayoutSeeded = "MacOS27LayoutSeeded"
         case showCaptureIndicator = "ShowCaptureIndicator"
+        case captureIndicatorPlacement = "CaptureIndicatorPlacement"
         case macOS27MenuReach = "MacOS27MenuReach"
         case macOS27MenuOwner = "MacOS27MenuOwner"
         case macOS27ClickRestoreDelay = "MacOS27ClickRestoreDelay"

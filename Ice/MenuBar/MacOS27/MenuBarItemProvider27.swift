@@ -402,6 +402,13 @@ enum MenuBarItemProvider27 {
         if retryIfMenuBarMoves, Bridging.getActiveMenuBarDisplayID() != activeDisplayID {
             return readItems(retryIfMenuBarMoves: false)
         }
+        // Ice's camera and microphone indicator is an item of Ice's own; the hit tests need its
+        // frame so a click on it is not taken for a click on empty bar.
+        CaptureIndicatorPanel27.setIndicatorFrame(rawItems.first { raw in
+            raw.pid == ownPID &&
+                raw.identifier.hasPrefix(CaptureIndicatorPanel27.autosaveNamePrefix) &&
+                raw.frame.width > 4
+        }?.frame)
         var newEntries = [CGWindowID: Entry]()
         var items = [MenuBarItem]()
         for raw in rawItems.sorted(by: { $0.frame.minX < $1.frame.minX }) {

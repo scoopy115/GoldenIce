@@ -16,22 +16,26 @@ import SwiftUI
 /// item number up to 127, Control Centre's bundle identifier and the capturing application's), so
 /// the only way to leave the user that indicator is to draw it.
 ///
+/// It is a status item of Ice's own rather than a panel laid over the bar: a panel had to guess
+/// at a free stretch of bar and landed on top of Ice's icon, and it could not be moved. As an
+/// item it takes its own room, can be Command-dragged like any other, and MenuBarAgent remembers
+/// where it was put. Ice's items stay on the bar while it conceals others, being Developer ID
+/// signed. Between uses it collapses to no width rather than going away, so its place is kept.
+///
 /// Clicking it opens Control Centre, where the camera's own controls — Video Effects, Mic Mode —
-/// live during a call. Control Centre is the one system item that opens from an Accessibility
-/// press while items are concealed, so the click costs no reveal.
+/// live during a call.
 @available(macOS 27.0, *)
 @MainActor
-final class CaptureIndicatorPanel27: NSPanel {
+final class CaptureIndicatorPanel27: NSObject {
     private let logger = Logger(category: "CaptureIndicatorPanel27")
     private weak var appState: AppState?
     private var cancellables = Set<AnyCancellable>()
-    private var hostingView: NSHostingView<CaptureIndicatorView>?
+    private var statusItem: NSStatusItem?
+    private var shownKind: CaptureIndicator27.Kind?
+    private var placement: CaptureIndicatorPlacement?
 
-    /// How wide the indicator is drawn.
-    private static let width: CGFloat = 36
-
-    /// How much room is left between it and the items beside it.
-    private static let gap: CGFloat = 6
+    /// The prefix of the item's autosave name, which Ice's item reader recognises it by.
+    nonisolated static let autosaveNamePrefix = "Ice.CaptureIndicator"
 
     private static let frameLock = NSLock()
     nonisolated(unsafe) private static var shownFrame: CGRect?
@@ -43,32 +47,17 @@ final class CaptureIndicatorPanel27: NSPanel {
         frameLock.withLock { shownFrame }
     }
 
-    private static func setIndicatorFrame(_ frame: CGRect?) {
+    /// Records the item's frame as Ice's item reader last saw it.
+    nonisolated static func setIndicatorFrame(_ frame: CGRect?) {
         frameLock.withLock { shownFrame = frame }
     }
 
     init(appState: AppState) {
         self.appState = appState
-        super.init(
-            contentRect: .zero,
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
-        )
-        self.isFloatingPanel = true
-        self.level = .statusBar
-        self.collectionBehavior = [.fullScreenNone, .ignoresCycle, .canJoinAllSpaces]
-        self.isOpaque = false
-        self.backgroundColor = .clear
-        self.hasShadow = false
-        self.hidesOnDeactivate = false
-        self.animationBehavior = .none
+        super.init()
     }
 
-    /// Starts following what is in use and where the bar is.
-    ///
-    /// The watcher reads the devices every couple of seconds and republishes either way, so the
-    /// indicator follows the items along the bar as they come and go without a timer of its own.
+    /// Starts following what is in use, and where the user wants the indicator.
     func performSetup(watcher: CaptureWatcher27) {
         watcher.$kind
             .receive(on: DispatchQueue.main)
@@ -78,60 +67,145 @@ final class CaptureIndicatorPanel27: NSPanel {
                 }
             }
             .store(in: &cancellables)
+        appState?.settings.advanced.$captureIndicatorPlacement
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else {
+                        return
+                    }
+                    // Placed anew: a fresh item, so MenuBarAgent takes the starting position.
+                    self.removeItem()
+                    self.update(kind: self.shownKind)
+                }
+            }
+            .store(in: &cancellables)
     }
 
-    /// Shows, moves or hides the indicator.
+    /// Shows or collapses the indicator.
     private func update(kind: CaptureIndicator27.Kind?) {
+        shownKind = kind
         guard
             let kind,
             let appState,
             appState.settings.advanced.showCaptureIndicator,
-            appState.concealer27.isConcealing,
-            let screen = NSScreen.screenWithActiveMenuBar,
-            let menuBarHeight = screen.getMenuBarHeight()
+            appState.concealer27.isConcealing
         else {
-            if isVisible {
-                orderOut(nil)
-            }
-            Self.setIndicatorFrame(nil)
+            collapse()
             return
         }
-        if let remaining = appState.concealer27.timeUntilSettled() {
-            // The bar is still moving: where the items are now is not where they will be, and
-            // placing the indicator against them would put it on top of one. Wait it out.
-            Task { [weak self] in
-                try? await Task.sleep(for: remaining + .milliseconds(50))
-                self?.update(kind: kind)
-            }
+        let item = item(for: appState.settings.advanced.captureIndicatorPlacement)
+        item.length = NSStatusItem.variableLength
+        if let button = item.button {
+            button.image = Self.image(for: kind)
+            button.toolTip = kind == .camera ? "The camera is in use" : "The microphone is in use"
+            button.setAccessibilityLabel(button.toolTip)
+        }
+    }
+
+    /// Shrinks the item to nothing, keeping its place on the bar.
+    private func collapse() {
+        guard let statusItem else {
             return
         }
-        let barFrame = CGRect(
-            x: screen.frame.minX,
-            y: screen.frame.maxY - menuBarHeight,
-            width: screen.frame.width,
-            height: menuBarHeight
-        )
-        let frame = CaptureIndicator27.frame(
-            barFrame: barFrame,
-            leftEdgeOfItems: MenuBarItemProvider27.leftEdge(for: screen.displayID),
-            width: Self.width,
-            gap: Self.gap
-        )
-        let view = CaptureIndicatorView(kind: kind) { [weak self] in
-            self?.openCaptureControls()
+        statusItem.button?.image = nil
+        statusItem.length = 0
+        Self.setIndicatorFrame(nil)
+    }
+
+    private func removeItem() {
+        if let statusItem {
+            NSStatusBar.system.removeStatusItem(statusItem)
         }
-        if let hostingView {
-            hostingView.rootView = view
-        } else {
-            let hostingView = NSHostingView(rootView: view)
-            contentView = hostingView
-            self.hostingView = hostingView
+        statusItem = nil
+        Self.setIndicatorFrame(nil)
+    }
+
+    /// The status item, created at the starting position for the given placement.
+    ///
+    /// MenuBarAgent places an item it has not seen before by the legacy preferred position, the
+    /// distance from the right end of the bar (measured on macOS 27.0.1: Ice's icon with 477 went
+    /// to 477 points from the right). Each placement has an autosave name of its own, so choosing
+    /// one gives a fresh item that MenuBarAgent places there; "where I drag it" keeps whatever
+    /// MenuBarAgent remembers.
+    private func item(for placement: CaptureIndicatorPlacement) -> NSStatusItem {
+        if let statusItem, self.placement == placement {
+            return statusItem
         }
-        setFrame(frame, display: true)
-        Self.setIndicatorFrame(frame)
-        if !isVisible {
-            orderFrontRegardless()
+        removeItem()
+        let autosaveName = "\(Self.autosaveNamePrefix).\(placement)"
+        let positionKey = "NSStatusItem Preferred Position \(autosaveName)"
+        if let position = startingPosition(for: placement) {
+            UserDefaults.standard.set(position, forKey: positionKey)
         }
+        let item = NSStatusBar.system.statusItem(withLength: 0)
+        item.autosaveName = autosaveName
+        item.button?.target = self
+        item.button?.action = #selector(clicked)
+        item.button?.imagePosition = .imageOnly
+        statusItem = item
+        self.placement = placement
+        logger.debug("Created the capture indicator item, placed \(String(describing: placement), privacy: .public)")
+        return item
+    }
+
+    /// The distance from the bar's right end to start the item at, or `nil` to leave it.
+    private func startingPosition(for placement: CaptureIndicatorPlacement) -> Double? {
+        guard let screen = NSScreen.screenWithActiveMenuBar else {
+            return nil
+        }
+        let barRight = CGDisplayBounds(screen.displayID).maxX
+        switch placement {
+        case .trailing:
+            // Just left of the system items (Wi-Fi, Control Centre, the clock).
+            guard let systemLeft = MenuBarItemProvider27.systemItemFrames().map(\.minX).min() else {
+                return 200
+            }
+            return Double(barRight - systemLeft + 2)
+        case .leading:
+            guard let leftEdge = MenuBarItemProvider27.leftEdge(for: screen.displayID) else {
+                return nil
+            }
+            return Double(barRight - leftEdge + 2)
+        case .custom:
+            return nil
+        }
+    }
+
+    @objc private func clicked() {
+        openCaptureControls()
+    }
+
+    /// The indicator's image: a green camera or an orange microphone on a capsule, the way
+    /// macOS draws its own.
+    private static func image(for kind: CaptureIndicator27.Kind) -> NSImage {
+        let size = NSSize(width: 30, height: 20)
+        let colour: NSColor = switch kind {
+        case .camera: NSColor(red: 0.16, green: 0.78, blue: 0.3, alpha: 1)
+        case .microphone: NSColor(red: 0.98, green: 0.58, blue: 0.09, alpha: 1)
+        }
+        let symbolName = kind == .camera ? "video.fill" : "mic.fill"
+        let image = NSImage(size: size, flipped: false) { rect in
+            colour.setFill()
+            NSBezierPath(roundedRect: rect, xRadius: rect.height / 2, yRadius: rect.height / 2).fill()
+            let configuration = NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
+                .applying(NSImage.SymbolConfiguration(paletteColors: [.white]))
+            if let symbol = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
+                .withSymbolConfiguration(configuration)
+            {
+                let symbolRect = NSRect(
+                    x: rect.midX - symbol.size.width / 2,
+                    y: rect.midY - symbol.size.height / 2,
+                    width: symbol.size.width,
+                    height: symbol.size.height
+                )
+                symbol.draw(in: symbolRect)
+            }
+            return true
+        }
+        image.isTemplate = false
+        return image
     }
 
     /// Opens the camera and microphone controls, the ones the system's own indicator opens.
@@ -186,43 +260,5 @@ final class CaptureIndicatorPanel27: NSPanel {
                 continuation.resume()
             }
         }
-    }
-}
-
-// MARK: - The indicator itself
-
-/// A green camera, or an orange microphone, drawn the way macOS draws its own.
-@available(macOS 27.0, *)
-private struct CaptureIndicatorView: View {
-    let kind: CaptureIndicator27.Kind
-    let press: () -> Void
-
-    private var colour: Color {
-        switch kind {
-        case .camera: Color(red: 0.16, green: 0.78, blue: 0.3)
-        case .microphone: Color(red: 0.98, green: 0.58, blue: 0.09)
-        }
-    }
-
-    private var symbol: String {
-        switch kind {
-        case .camera: "video.fill"
-        case .microphone: "mic.fill"
-        }
-    }
-
-    var body: some View {
-        ZStack {
-            Capsule(style: .continuous)
-                .fill(colour)
-                .frame(width: 30, height: 20)
-            Image(systemName: symbol)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.white)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .contentShape(Rectangle())
-        .onTapGesture(perform: press)
-        .help(kind == .camera ? "The camera is in use" : "The microphone is in use")
     }
 }
