@@ -28,15 +28,20 @@ final class Hotkey: ObservableObject {
     /// The hotkey's action.
     let action: HotkeyAction
 
+    /// Runs in place of the action, for hotkeys that are not one of the app's fixed actions,
+    /// such as one that switches to a particular profile.
+    var handler: (() -> Void)?
+
     /// A Boolean value that indicates whether the hotkey is enabled.
     var isEnabled: Bool {
         listener != nil
     }
 
     /// Creates a hotkey with the given action and key combination.
-    init(action: HotkeyAction, keyCombination: KeyCombination? = nil) {
+    init(action: HotkeyAction, keyCombination: KeyCombination? = nil, handler: (() -> Void)? = nil) {
         self.action = action
         self.keyCombination = keyCombination
+        self.handler = handler
     }
 
     /// Performs the initial setup of the hotkey.
@@ -79,7 +84,11 @@ extension Hotkey {
                 guard let hotkey, let appState else {
                     return
                 }
-                hotkey.action.perform(appState: appState)
+                if let handler = hotkey.handler {
+                    handler()
+                } else {
+                    hotkey.action.perform(appState: appState)
+                }
             }
             guard let id else {
                 return nil

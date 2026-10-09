@@ -22,7 +22,6 @@ struct MenuBarLayoutSettingsPane: View {
             IceForm(spacing: 20) {
                 header
                 if #available(macOS 27.0, *) {
-                    ActiveProfileBar(manager: appState.profileManager27)
                     StuckOverflowWarning(concealer: appState.concealer27)
                 }
                 layoutBars
@@ -108,7 +107,7 @@ struct MenuBarLayoutSettingsPane: View {
     }
 
     @ViewBuilder
-    private func layoutBar(for name: MenuBarSection.Name) -> some View {
+    func layoutBar(for name: MenuBarSection.Name) -> some View {
         if
             let section = appState.menuBarManager.section(withName: name),
             section.isEnabled
@@ -205,48 +204,6 @@ private struct DisabledItemsBar: View {
         .opacity(0.6)
         .help(name)
         .accessibilityLabel(name)
-    }
-}
-
-/// Says which profile the layout belongs to, and switches to another.
-@available(macOS 27.0, *)
-private struct ActiveProfileBar: View {
-    @ObservedObject var manager: ProfileManager27
-
-    var body: some View {
-        if !manager.profiles.isEmpty {
-            IceSection {
-                HStack(spacing: 10) {
-                    Image(systemName: "square.stack.3d.up")
-                        .foregroundStyle(.secondary)
-                    if let active = manager.activeProfile {
-                        Text("Editing profile **\(active.name)**. Changes are saved to it.")
-                    } else {
-                        Text("No profile is active. Changes aren't saved to a profile.")
-                    }
-                    Spacer()
-                    Picker("Profile", selection: Binding(
-                        get: { manager.activeProfileID },
-                        set: { id in
-                            if let profile = manager.profiles.first(where: { $0.id == id }) {
-                                manager.apply(profile)
-                            }
-                        }
-                    )) {
-                        if manager.activeProfileID == nil {
-                            Text("None").tag(UUID?.none)
-                        }
-                        ForEach(manager.profiles) { profile in
-                            Text(profile.name).tag(UUID?.some(profile.id))
-                        }
-                    }
-                    .labelsHidden()
-                    .fixedSize()
-                }
-                .font(.system(size: 12))
-                .padding(.vertical, 2)
-            }
-        }
     }
 }
 

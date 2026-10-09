@@ -21,14 +21,41 @@ struct LayoutProfile: Codable, Identifiable, Equatable {
         case builtInDisplayOnly
     }
 
+    /// The symbols a profile's icon can be chosen from.
+    static let symbols = [
+        "square.stack.3d.up", "briefcase", "house", "display.2", "laptopcomputer",
+        "person.2", "video", "music.note", "gamecontroller", "cup.and.saucer",
+        "moon", "airplane", "graduationcap", "paintbrush", "hammer", "sparkles",
+    ]
+
     var id = UUID()
     var name: String
+    var symbol = LayoutProfile.symbols[0]
     var layout: [String: Int]
     var showWhenFrontmost: [String]
     var trigger: Trigger = .manual
+    var hotkey: KeyCombination?
 
     var sections: [String: MacOS27Section] {
         layout.compactMapValues(MacOS27Section.init(rawValue:))
+    }
+
+    init(name: String, layout: [String: Int], showWhenFrontmost: [String]) {
+        self.name = name
+        self.layout = layout
+        self.showWhenFrontmost = showWhenFrontmost
+    }
+
+    // Profiles saved before a field existed are read with its default.
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        symbol = try container.decodeIfPresent(String.self, forKey: .symbol) ?? LayoutProfile.symbols[0]
+        layout = try container.decode([String: Int].self, forKey: .layout)
+        showWhenFrontmost = try container.decodeIfPresent([String].self, forKey: .showWhenFrontmost) ?? []
+        trigger = try container.decodeIfPresent(Trigger.self, forKey: .trigger) ?? .manual
+        hotkey = try container.decodeIfPresent(KeyCombination.self, forKey: .hotkey)
     }
 }
 
@@ -62,8 +89,21 @@ final class ProfileManager27: ObservableObject {
         return decoder
     }()
 
-    @Published private(set) var profiles = [LayoutProfile]()
+    @Published private(set) var profiles = [LayoutProfile]() {
+        didSet {
+            if profiles.map(\.id) != oldValue.map(\.id) || profiles.map(\.hotkey) != oldValue.map(\.hotkey) {
+                rebuildHotkeys()
+            }
+        }
+    }
     @Published private(set) var activeProfileID: UUID?
+
+    /// One hotkey per profile, which switches to it.
+    @Published private(set) var hotkeys = [UUID: Hotkey]()
+    private var hotkeyCancellables = Set<AnyCancellable>()
+
+    /// What was in force before a profile was opened for editing, to go back to afterwards.
+    private var stateBeforeEditing: (profileID: UUID?, layout: [String: MacOS27Section], rules: Set<String>)?
 
     func performSetup(with appState: AppState) {
         self.appState = appState
@@ -76,6 +116,7 @@ final class ProfileManager27: ObservableObject {
         if let id = Defaults.string(forKey: .activeLayoutProfile) {
             activeProfileID = UUID(uuidString: id)
         }
+        rebuildHotkeys()
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             // Displays arrive one after another; act once they have settled.
             .debounce(for: 1.5, scheduler: DispatchQueue.main)
@@ -132,6 +173,92 @@ final class ProfileManager27: ObservableObject {
     /// The active profile, if one is.
     var activeProfile: LayoutProfile? {
         profiles.first { $0.id == activeProfileID }
+    }
+
+    /// Stops using profiles: the layout stays as it is, and changes are no longer saved to one.
+    func deactivate() {
+        activeProfileID = nil
+        persist()
+    }
+
+    /// Switches to the profile after the active one, or to the first.
+    func applyNext() {
+        guard !profiles.isEmpty else {
+            return
+        }
+        let index = profiles.firstIndex { $0.id == activeProfileID }.map { ($0 + 1) % profiles.count } ?? 0
+        apply(profiles[index])
+    }
+
+    func setSymbol(_ symbol: String, for profile: LayoutProfile) {
+        guard let index = profiles.firstIndex(where: { $0.id == profile.id }) else {
+            return
+        }
+        profiles[index].symbol = symbol
+        persist()
+    }
+
+    // MARK: Editing
+
+    /// Applies a profile so its layout can be edited, remembering what was in force before.
+    func beginEditing(_ profile: LayoutProfile) {
+        guard let concealer = appState?.concealer27 else {
+            return
+        }
+        if stateBeforeEditing == nil {
+            stateBeforeEditing = (activeProfileID, concealer.layoutSnapshot, concealer.showWhenFrontmost)
+        }
+        apply(profile)
+    }
+
+    /// Puts back what was in force before editing began. The edited profile keeps its changes,
+    /// which were saved to it while it was active.
+    func endEditing() {
+        guard let previous = stateBeforeEditing, let concealer = appState?.concealer27 else {
+            return
+        }
+        stateBeforeEditing = nil
+        if let id = previous.profileID, let profile = profiles.first(where: { $0.id == id }) {
+            apply(profile)
+        } else {
+            activeProfileID = nil
+            persist()
+            concealer.applySnapshot(layout: previous.layout, showWhenFrontmost: previous.rules)
+        }
+    }
+
+    // MARK: Hotkeys
+
+    private func rebuildHotkeys() {
+        for hotkey in hotkeys.values {
+            hotkey.disable()
+        }
+        hotkeyCancellables.removeAll()
+        var built = [UUID: Hotkey]()
+        for profile in profiles {
+            let id = profile.id
+            let hotkey = Hotkey(action: .nextProfile, keyCombination: profile.hotkey) { [weak self] in
+                guard let self, let profile = profiles.first(where: { $0.id == id }) else {
+                    return
+                }
+                apply(profile)
+            }
+            if let appState {
+                hotkey.performSetup(with: appState)
+            }
+            hotkey.$keyCombination
+                .dropFirst()
+                .sink { [weak self] keyCombination in
+                    guard let self, let index = profiles.firstIndex(where: { $0.id == id }) else {
+                        return
+                    }
+                    profiles[index].hotkey = keyCombination
+                    persist()
+                }
+                .store(in: &hotkeyCancellables)
+            built[id] = hotkey
+        }
+        hotkeys = built
     }
 
     /// Switches to a profile.

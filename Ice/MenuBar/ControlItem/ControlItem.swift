@@ -606,9 +606,17 @@ final class ControlItem {
                 item.target = self
                 item.representedObject = profile.id
                 item.state = profile.id == manager.activeProfileID ? .on : .off
-                item.indentationLevel = 1
+                item.image = NSImage(systemSymbolName: profile.symbol, accessibilityDescription: nil)
                 menu.addItem(item)
             }
+            let noProfileItem = NSMenuItem(
+                title: "No Profile",
+                action: #selector(applyProfile(for:)),
+                keyEquivalent: ""
+            )
+            noProfileItem.target = self
+            noProfileItem.state = manager.activeProfileID == nil ? .on : .off
+            menu.addItem(noProfileItem)
             menu.addItem(.separator())
         }
 
@@ -652,12 +660,14 @@ final class ControlItem {
 
     /// Switches to the layout profile of the given menu item.
     @objc private func applyProfile(for menuItem: NSMenuItem) {
+        guard #available(macOS 27.0, *), let manager = appState?.profileManager27 else {
+            return
+        }
         guard
-            #available(macOS 27.0, *),
             let id = menuItem.representedObject as? UUID,
-            let manager = appState?.profileManager27,
             let profile = manager.profiles.first(where: { $0.id == id })
         else {
+            manager.deactivate()
             return
         }
         manager.apply(profile)

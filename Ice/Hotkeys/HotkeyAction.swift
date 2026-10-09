@@ -11,6 +11,9 @@ enum HotkeyAction: String, Codable, CaseIterable {
     // Menu Bar Items
     case searchMenuBarItems = "SearchMenuBarItems"
 
+    // Profiles
+    case nextProfile = "NextProfile"
+
     // Other
     case enableIceBar = "EnableIceBar"
     case toggleApplicationMenus = "ToggleApplicationMenus"
@@ -38,6 +41,10 @@ enum HotkeyAction: String, Codable, CaseIterable {
             }
         case .searchMenuBarItems:
             appState.menuBarManager.searchPanel.toggle()
+        case .nextProfile:
+            if #available(macOS 27.0, *) {
+                appState.profileManager27.applyNext()
+            }
         case .enableIceBar:
             appState.settings.general.useIceBar.toggle()
         case .toggleApplicationMenus:

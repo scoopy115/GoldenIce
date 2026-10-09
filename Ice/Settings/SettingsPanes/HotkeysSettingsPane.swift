@@ -18,6 +18,11 @@ struct HotkeysSettingsPane: View {
             IceSection("Menu Bar Items") {
                 hotkeyRecorder(forAction: .searchMenuBarItems)
             }
+            if #available(macOS 27.0, *) {
+                ProfileHotkeys(manager: appState.profileManager27) {
+                    hotkeyRecorder(forAction: .nextProfile)
+                }
+            }
             IceSection("Other") {
                 hotkeyRecorder(forAction: .enableIceBar)
                 hotkeyRecorder(forAction: .toggleApplicationMenus)
@@ -36,6 +41,8 @@ struct HotkeysSettingsPane: View {
                     Text("Toggle the always-hidden section")
                 case .searchMenuBarItems:
                     Text("Search menu bar items")
+                case .nextProfile:
+                    Text("Switch to the next profile")
                 case .enableIceBar:
                     Text("Enable the Ice Bar")
                 case .toggleApplicationMenus:
@@ -52,6 +59,26 @@ struct HotkeysSettingsPane: View {
                 hotkeyRecorder(forAction: .toggleHiddenSection)
             } else if case .alwaysHidden = name {
                 hotkeyRecorder(forAction: .toggleAlwaysHiddenSection)
+            }
+        }
+    }
+}
+
+/// A hotkey for each profile, and one that steps through them.
+@available(macOS 27.0, *)
+private struct ProfileHotkeys<NextProfile: View>: View {
+    @ObservedObject var manager: ProfileManager27
+    @ViewBuilder var nextProfile: NextProfile
+
+    var body: some View {
+        IceSection("Profiles") {
+            nextProfile
+            ForEach(manager.profiles) { profile in
+                if let hotkey = manager.hotkeys[profile.id] {
+                    HotkeyRecorder(hotkey: hotkey) {
+                        Label("Switch to \(profile.name)", systemImage: profile.symbol)
+                    }
+                }
             }
         }
     }
