@@ -19,7 +19,7 @@ import OSLog
 final class Concealer27: ObservableObject {
     private let controller = ConcealmentController27(backend: MenuBarAssessmentAssertion27())
     private let logger = Logger(category: "Concealer27")
-    private weak var appState: AppState?
+    private(set) weak var appState: AppState?
     private var observers = [NSObjectProtocol]()
     private var applyTask: Task<Void, Never>?
     private var suspendedUntil: ContinuousClock.Instant?
@@ -38,6 +38,13 @@ final class Concealer27: ObservableObject {
 
     /// Whether any application is meant to be concealed right now.
     private(set) var isConcealing = false
+
+    /// When set, every running application outside this set is concealed, whatever the
+    /// layout says. ``IconPlacer27`` uses it to give Ice's own icon room to be drawn.
+    var isolatedAllowlist: Set<String>?
+
+    /// Moves Ice's icon out of the system overflow when it lands there.
+    private(set) lazy var iconPlacer = IconPlacer27(concealer: self)
 
     /// Process identifiers of the applications meant to be concealed right now.
     private(set) var concealedPIDs = Set<pid_t>()
@@ -144,6 +151,11 @@ final class Concealer27: ObservableObject {
             .store(in: &cancellables)
         appState.captureIndicatorPanel27.performSetup(watcher: appState.captureWatcher27)
         update()
+        Task { [weak self] in
+            // The first read of every application's items can take seconds.
+            try? await Task.sleep(for: .seconds(3))
+            await self?.iconPlacer.checkPlacement()
+        }
     }
 
     /// Derives what to conceal from Ice's sections and applies it.
@@ -156,12 +168,19 @@ final class Concealer27: ObservableObject {
         }
         let applications = NSWorkspace.shared.runningApplications
         let running = Set(applications.compactMap(\.bundleIdentifier))
-        let layout = SectionLayout27.effectiveLayout(observed: [:], saved: savedLayout, running: running)
-        let target = ConcealmentPlanner27.concealedSets(
-            layout: layout,
-            state: revealState(appState),
-            temporarilyShown: Set(temporarilyShown.keys)
-        )
+        let target: [Set<String>]
+        if let isolatedAllowlist {
+            // Everything but the allowlist is concealed while Ice places its own icon.
+            let concealed = running.subtracting(isolatedAllowlist).subtracting(IconPlacer27.neverConcealed)
+            target = concealed.isEmpty ? [] : [concealed]
+        } else {
+            let layout = SectionLayout27.effectiveLayout(observed: [:], saved: savedLayout, running: running)
+            target = ConcealmentPlanner27.concealedSets(
+                layout: layout,
+                state: revealState(appState),
+                temporarilyShown: Set(temporarilyShown.keys)
+            )
+        }
         let concealed = ConcealmentPlanner27.effectivelyConcealed(sets: target)
         isConcealing = !target.isEmpty
         // The devices are only worth asking about while something is hidden: macOS draws its own
@@ -206,6 +225,7 @@ final class Concealer27: ObservableObject {
             }
             await self.appState?.itemManager.cacheItemsIfNeeded()
             await self.checkStuckOverflow()
+            await self.iconPlacer.checkPlacement()
         }
     }
 
