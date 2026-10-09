@@ -111,7 +111,15 @@ final class ProfileManager27: ObservableObject {
             let data = Defaults.data(forKey: .layoutProfiles),
             let profiles = try? decoder.decode([LayoutProfile].self, from: data)
         {
-            self.profiles = profiles
+            // One profile per trigger: the first keeps it, any later one switches by hand.
+            var seen = Set<LayoutProfile.Trigger>()
+            self.profiles = profiles.map { profile in
+                var profile = profile
+                if profile.trigger != .manual, !seen.insert(profile.trigger).inserted {
+                    profile.trigger = .manual
+                }
+                return profile
+            }
         }
         if let id = Defaults.string(forKey: .activeLayoutProfile) {
             activeProfileID = UUID(uuidString: id)
@@ -280,9 +288,17 @@ final class ProfileManager27: ObservableObject {
         persist()
     }
 
+    /// Sets when a profile switches in by itself. Only one profile can switch in for each
+    /// situation, or the bar would not know which to pick, so another profile that had the
+    /// same trigger goes back to switching by hand.
     func setTrigger(_ trigger: LayoutProfile.Trigger, for profile: LayoutProfile) {
         guard let index = profiles.firstIndex(where: { $0.id == profile.id }) else {
             return
+        }
+        if trigger != .manual {
+            for other in profiles.indices where other != index && profiles[other].trigger == trigger {
+                profiles[other].trigger = .manual
+            }
         }
         profiles[index].trigger = trigger
         persist()

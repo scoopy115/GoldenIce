@@ -103,7 +103,7 @@ private struct ProfilesSettingsPane27: View {
             }
         }
         .sheet(item: $editingProfile, onDismiss: manager.endEditing) { profile in
-            ProfileLayoutEditor(profile: profile, manager: manager) {
+            ProfileEditor(profileID: profile.id, manager: manager) {
                 editingProfile = nil
             }
             .environmentObject(appState)
@@ -125,159 +125,55 @@ private struct ProfileRow: View {
     let profile: LayoutProfile
     @ObservedObject var manager: ProfileManager27
     let onEdit: () -> Void
-    @State private var isRenaming = false
-    @State private var newName = ""
 
     private var isActive: Bool {
         manager.activeProfileID == profile.id
     }
 
-    /// The applications this profile hides, the ones that tell profiles apart.
-    private var hiddenBundleIDs: [String] {
-        profile.layout
-            .filter { $0.value != MacOS27Section.visible.rawValue }
-            .map(\.key)
-            .sorted()
-    }
-
-    private func title(for trigger: LayoutProfile.Trigger) -> LocalizedStringKey {
-        switch trigger {
-        case .manual: "Manually"
-        case .externalDisplay: "With an external display"
-        case .builtInDisplayOnly: "On the built-in display only"
+    private var triggerSummary: LocalizedStringKey? {
+        switch profile.trigger {
+        case .manual: nil
+        case .externalDisplay: "Switches in when you connect a display"
+        case .builtInDisplayOnly: "Switches in when you're on the built-in display alone"
         }
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                Button {
-                    if isActive {
-                        manager.deactivate()
-                    } else {
-                        manager.apply(profile)
-                    }
-                } label: {
-                    Image(systemName: isActive ? "checkmark.circle.fill" : "circle")
-                        .foregroundStyle(isActive ? Color.accentColor : .secondary)
-                        .font(.system(size: 17))
+        HStack(spacing: 10) {
+            Button {
+                if isActive {
+                    manager.deactivate()
+                } else {
+                    manager.apply(profile)
                 }
-                .buttonStyle(.plain)
-                .help(isActive ? "Stop using this profile" : "Switch to this profile")
+            } label: {
+                Image(systemName: isActive ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(isActive ? Color.accentColor : .secondary)
+                    .font(.system(size: 17))
+            }
+            .buttonStyle(.plain)
+            .help(isActive ? "Stop using this profile" : "Switch to this profile")
 
-                Menu {
-                    ForEach(LayoutProfile.symbols, id: \.self) { symbol in
-                        Button {
-                            manager.setSymbol(symbol, for: profile)
-                        } label: {
-                            Label(symbol, systemImage: symbol)
-                                .labelStyle(.iconOnly)
-                        }
-                    }
-                } label: {
-                    Image(systemName: profile.symbol)
-                        .font(.system(size: 14))
-                        .frame(width: 20)
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help("Choose an icon")
+            Image(systemName: profile.symbol)
+                .font(.system(size: 15))
+                .foregroundStyle(.secondary)
+                .frame(width: 22, alignment: .center)
 
+            VStack(alignment: .leading, spacing: 1) {
                 Text(profile.name)
                     .fontWeight(isActive ? .semibold : .regular)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                Button("Edit Layout…", action: onEdit)
-                    .fixedSize()
-
-                Menu {
-                    Button("Rename…") {
-                        newName = profile.name
-                        isRenaming = true
-                    }
-                    Divider()
-                    Button("Delete", role: .destructive) {
-                        manager.delete(profile)
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-            }
-
-            HStack(spacing: 4) {
-                Text(hiddenBundleIDs.isEmpty ? "Hides nothing" : "Hides")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                ForEach(hiddenBundleIDs.prefix(14), id: \.self) { bundleID in
-                    ApplicationIcon(bundleID: bundleID)
-                }
-                if hiddenBundleIDs.count > 14 {
-                    Text("+\(hiddenBundleIDs.count - 14)")
+                if let triggerSummary {
+                    Text(triggerSummary)
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
-                Spacer(minLength: 8)
-                Menu {
-                    ForEach(LayoutProfile.Trigger.allCases, id: \.self) { trigger in
-                        Button {
-                            manager.setTrigger(trigger, for: profile)
-                        } label: {
-                            if trigger == profile.trigger {
-                                Label(title(for: trigger), systemImage: "checkmark")
-                            } else {
-                                Text(title(for: trigger))
-                            }
-                        }
-                    }
-                } label: {
-                    Text(title(for: profile.trigger))
-                        .font(.system(size: 11))
-                }
-                .menuStyle(.borderlessButton)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button("Edit Profile…", action: onEdit)
                 .fixedSize()
-                .help("When this profile switches in by itself")
-            }
-            .padding(.leading, 53)
         }
-        .padding(.vertical, 4)
-        .alert("Rename Profile", isPresented: $isRenaming) {
-            TextField("Name", text: $newName)
-            Button("Rename") {
-                let name = newName.trimmingCharacters(in: .whitespaces)
-                if !name.isEmpty {
-                    manager.rename(profile, to: name)
-                }
-            }
-            Button("Cancel", role: .cancel) { }
-        }
-    }
-}
-
-/// An application's icon, small, with its name on hover.
-private struct ApplicationIcon: View {
-    let bundleID: String
-
-    private var url: URL? {
-        NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
-    }
-
-    var body: some View {
-        Group {
-            if let url {
-                Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
-                    .resizable()
-            } else {
-                Image(systemName: "app.dashed")
-                    .resizable()
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .frame(width: 16, height: 16)
-        .help(url.map { FileManager.default.displayName(atPath: $0.path).replacingOccurrences(of: ".app", with: "") } ?? bundleID)
+        .padding(.vertical, 3)
     }
 }
 
@@ -309,46 +205,135 @@ private struct NoProfileRow: View {
     }
 }
 
-/// A profile's layout, edited in a sheet over the Profiles pane.
+/// Everything about a profile, edited in a sheet over the Profiles pane: its name, icon,
+/// when it switches in by itself, and its menu bar layout.
 ///
-/// The profile is applied while the sheet is open, so the bars show its arrangement and
+/// The profile is applied while the sheet is open, so the layout bars show its arrangement and
 /// whatever is dragged is saved to it. Closing the sheet puts back what was in force before.
 @available(macOS 27.0, *)
-private struct ProfileLayoutEditor: View {
+private struct ProfileEditor: View {
     @EnvironmentObject var appState: AppState
-    let profile: LayoutProfile
+    let profileID: UUID
     @ObservedObject var manager: ProfileManager27
     let done: () -> Void
 
+    @State private var name = ""
+    @State private var isConfirmingDelete = false
+
+    private var profile: LayoutProfile? {
+        manager.profiles.first { $0.id == profileID }
+    }
+
+    private let iconColumns = Array(repeating: GridItem(.fixed(34), spacing: 6), count: 16)
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 10) {
-                Image(systemName: profile.symbol)
-                    .font(.system(size: 22))
-                    .foregroundStyle(Color.accentColor)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Edit “\(profile.name)”")
-                        .font(.title2.bold())
+        if let profile {
+            VStack(alignment: .leading, spacing: 18) {
+                Text("Edit Profile")
+                    .font(.title2.bold())
+
+                LabeledContent("Name") {
+                    TextField("Name", text: $name)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 280)
+                        .onSubmit(commitName)
+                }
+
+                LabeledContent("Icon") {
+                    LazyVGrid(columns: iconColumns, alignment: .leading, spacing: 6) {
+                        ForEach(LayoutProfile.symbols, id: \.self) { symbol in
+                            Button {
+                                manager.setSymbol(symbol, for: profile)
+                            } label: {
+                                Image(systemName: symbol)
+                                    .font(.system(size: 14))
+                                    .frame(width: 30, height: 30)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                            .fill(symbol == profile.symbol ? Color.accentColor.opacity(0.25) : Color.primary.opacity(0.05))
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                            .strokeBorder(symbol == profile.symbol ? Color.accentColor : .clear, lineWidth: 1.5)
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+
+                LabeledContent("Switch automatically") {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Picker("", selection: Binding(
+                            get: { profile.trigger },
+                            set: { manager.setTrigger($0, for: profile) }
+                        )) {
+                            Text("Never — I switch by hand").tag(LayoutProfile.Trigger.manual)
+                            Text("When I connect an external display").tag(LayoutProfile.Trigger.externalDisplay)
+                            Text("When I'm on the built-in display alone").tag(LayoutProfile.Trigger.builtInDisplayOnly)
+                        }
+                        .pickerStyle(.radioGroup)
+                        .labelsHidden()
+                        Text("Every display shows the same menu bar. This only decides when GoldenIce switches to this profile by itself; one profile at a time can do so for each situation.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Layout")
+                        .font(.headline)
                     Text("Drag items between sections. Changes are saved to this profile.")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button("Done", action: done)
-                    .keyboardShortcut(.defaultAction)
-            }
-            ForEach(MenuBarSection.Name.allCases, id: \.self) { name in
-                if let section = appState.menuBarManager.section(withName: name), section.isEnabled {
-                    VStack(alignment: .leading) {
-                        Text(name.localized)
-                            .font(.headline)
-                            .padding(.leading, 8)
-                        LayoutBar(imageCache: appState.imageCache, section: name)
+                    ForEach(MenuBarSection.Name.allCases, id: \.self) { name in
+                        if let section = appState.menuBarManager.section(withName: name), section.isEnabled {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(name.localized)
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .padding(.leading, 8)
+                                LayoutBar(imageCache: appState.imageCache, section: name)
+                            }
+                        }
                     }
                 }
+
+                HStack {
+                    Button("Delete Profile…", role: .destructive) {
+                        isConfirmingDelete = true
+                    }
+                    Spacer()
+                    Button("Done") {
+                        commitName()
+                        done()
+                    }
+                    .keyboardShortcut(.defaultAction)
+                }
+            }
+            .padding(24)
+            .frame(width: 780)
+            .onAppear {
+                name = profile.name
+            }
+            .confirmationDialog("Delete “\(profile.name)”?", isPresented: $isConfirmingDelete) {
+                Button("Delete Profile", role: .destructive) {
+                    done()
+                    manager.delete(profile)
+                }
+            } message: {
+                Text("Your menu bar stays as it is now.")
             }
         }
-        .padding(24)
-        .frame(width: 760)
+    }
+
+    private func commitName() {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard let profile, !trimmed.isEmpty, trimmed != profile.name else {
+            return
+        }
+        manager.rename(profile, to: trimmed)
     }
 }
