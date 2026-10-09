@@ -105,6 +105,13 @@ enum Reorderer27 {
             logger.warning("Could not move \(item.logString, privacy: .public)")
         }
 
+        // The section is still drawn on its own, in its new order: photograph it now. Images
+        // taken while the items were sliding into place could hold a piece of a neighbour, and
+        // they would otherwise stay until the item was photographed again (measured on
+        // macOS 27.0.1, 2026-10-09: Claude's tile kept half of Gnomon's glyph after a move).
+        try? await Task.sleep(for: settle)
+        await appState.itemImageStore27.captureActiveMenuBar(appState: appState, force: true)
+
         concealer.isolatedAllowlist = nil
         concealer.update()
         try? await Task.sleep(for: settle)
