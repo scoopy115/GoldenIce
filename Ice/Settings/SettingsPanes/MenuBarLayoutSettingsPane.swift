@@ -25,6 +25,9 @@ struct MenuBarLayoutSettingsPane: View {
                     StuckOverflowWarning(concealer: appState.concealer27)
                 }
                 layoutBars
+                if #available(macOS 27.0, *) {
+                    DisabledItemsBar(concealer: appState.concealer27)
+                }
             }
         }
     }
@@ -117,6 +120,90 @@ struct MenuBarLayoutSettingsPane: View {
                 LayoutBar(imageCache: appState.imageCache, section: name)
             }
         }
+    }
+}
+
+/// Lists the items macOS never draws because their applications are switched off in
+/// System Settings > Menu Bar.
+///
+/// They belong to no section: hiding or showing them changes nothing until macOS is allowed to
+/// draw them again, so they are kept apart from the sections Ice controls.
+@available(macOS 27.0, *)
+private struct DisabledItemsBar: View {
+    @ObservedObject var concealer: Concealer27
+
+    /// The System Settings pane with the "Allow in the Menu Bar" switches.
+    private static let menuBarSettingsURL = URL(string: "x-apple.systempreferences:com.apple.ControlCenter-Settings.extension")
+
+    private var backgroundShape: some InsettableShape {
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+    }
+
+    /// One entry per application, in the order of its first item.
+    private var applications: [NSRunningApplication] {
+        var seen = Set<pid_t>()
+        return concealer.disabledItems.compactMap { item in
+            guard let application = item.sourceApplication, seen.insert(application.processIdentifier).inserted else {
+                return nil
+            }
+            return application
+        }
+    }
+
+    var body: some View {
+        if !applications.isEmpty {
+            VStack(alignment: .leading) {
+                Text("Disabled in System Settings")
+                    .font(.headline)
+                    .padding(.leading, 8)
+
+                HStack(spacing: 14) {
+                    ForEach(applications, id: \.processIdentifier) { application in
+                        icon(for: application)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .frame(height: 48)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .background(.quaternary.opacity(0.5), in: backgroundShape)
+                .overlay {
+                    backgroundShape
+                        .strokeBorder(.quaternary)
+                }
+
+                HStack(alignment: .firstTextBaseline) {
+                    Text("macOS never shows these items. Turn them on under Allow in the Menu Bar.")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                    if let url = Self.menuBarSettingsURL {
+                        Button("Open Menu Bar Settings…") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                }
+                .padding(.horizontal, 8)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func icon(for application: NSRunningApplication) -> some View {
+        let name = application.localizedName ?? application.bundleIdentifier ?? "Application"
+        Group {
+            if let image = application.icon {
+                Image(nsImage: image)
+                    .resizable()
+                    .frame(width: 22, height: 22)
+            } else {
+                Image(systemName: "app.dashed")
+                    .frame(width: 22, height: 22)
+            }
+        }
+        .opacity(0.6)
+        .help(name)
+        .accessibilityLabel(name)
     }
 }
 

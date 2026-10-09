@@ -675,6 +675,7 @@ final class Concealer27: ObservableObject {
         var cache = MenuBarItemManager.ItemCache(displayID: displayID)
         let layout = savedLayout
         let bundleIDs = MenuBarItem.sourceBundleIDs(of: items)
+        var disabled = [MenuBarItem]()
         for item in items.sorted(by: { $0.bounds.minX < $1.bounds.minX }) where item.canBeHidden && !item.isSystemClone {
             if item.isControlItem {
                 if item.tag == .visibleControlItem {
@@ -682,26 +683,34 @@ final class Concealer27: ObservableObject {
                 }
                 continue
             }
+            if Self.isParkedOffEveryBar(item) {
+                // macOS never draws this item, whatever its section: its application is
+                // switched off in System Settings > Menu Bar. It is listed on its own rather than
+                // in a section, where it would only look like an item Ice failed to show or hide.
+                disabled.append(item)
+                continue
+            }
             switch layout[item.sourcePID.flatMap { bundleIDs[$0] } ?? ""] ?? .visible {
-            case .visible where Self.isParkedOffEveryBar(item):
-                // macOS never draws this item: its application is switched off in System
-                // Settings > Menu Bar, or there was no room for it when it was created. On the
-                // bar it cannot be reached at all, so it is listed with the hidden items, where
-                // the Ice Bar can still open it through Accessibility.
-                cache[.hidden].append(item)
             case .visible: cache[.visible].append(item)
             case .hidden: cache[.hidden].append(item)
             case .alwaysHidden: cache[.alwaysHidden].append(item)
             }
         }
+        if disabled.map(\.tag) != disabledItems.map(\.tag) {
+            disabledItems = disabled
+        }
         return cache
     }
+
+    /// Items macOS never draws because their applications are switched off in System Settings >
+    /// Menu Bar, from the last read of the bar.
+    @Published private(set) var disabledItems = [MenuBarItem]()
 
     /// Whether MenuBarAgent has parked the item below every display rather than drawing it.
     ///
     /// Measured on macOS 27.0.1: items of applications switched off in System Settings >
-    /// Menu Bar report a frame just below the screen (y 970–986 on a 982 pt display), as do
-    /// items created when the bar had no room. Concealed items keep the frame they were last
+    /// Menu Bar report a frame just below the screen (y 970–986 on a 982 pt display), exactly
+    /// the applications listed as off there. Concealed items keep the frame they were last
     /// drawn at, and folded ones stack against the overflow button, so neither is caught.
     private static func isParkedOffEveryBar(_ item: MenuBarItem) -> Bool {
         guard item.bounds.width > 1 else {
