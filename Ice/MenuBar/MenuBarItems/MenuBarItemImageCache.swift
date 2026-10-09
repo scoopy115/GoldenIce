@@ -349,10 +349,16 @@ final class MenuBarItemImageCache: ObservableObject {
             let store = await appState.itemImageStore27
             await store.captureActiveMenuBar(appState: appState)
             await store.photographMissing(items: items, appState: appState)
+            let existing = await MainActor.run { Set(images.keys) }
             var newImages = [MenuBarItemTag: CapturedImage]()
             for item in items {
                 if let image = await store.image(for: item) {
                     newImages[item.tag] = image
+                } else if !existing.contains(item.tag), let icon = Self.applicationIcon(for: item) {
+                    // An item macOS keeps folded away cannot be photographed. Its
+                    // application's icon stands in until it can, so the Ice Bar still
+                    // has something to show and click.
+                    newImages[item.tag] = icon
                 }
             }
             await mergeImages(newImages)
@@ -472,5 +478,46 @@ final class MenuBarItemImageCache: ObservableObject {
             return false
         }
         return true
+    }
+}
+
+// MARK: - Application Icon Fallback
+
+extension MenuBarItemImageCache {
+    /// Returns the icon of the item's application, drawn at the size of a menu bar item.
+    static func applicationIcon(for item: MenuBarItem) -> CapturedImage? {
+        guard !item.isControlItem, let icon = item.sourceApplication?.icon else {
+            return nil
+        }
+        let scale: CGFloat = 2
+        let canvas = CGSize(width: 24, height: 24)
+        let iconSize: CGFloat = 18
+        guard let context = CGContext(
+            data: nil,
+            width: Int(canvas.width * scale),
+            height: Int(canvas.height * scale),
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            return nil
+        }
+        let rect = CGRect(
+            x: (canvas.width - iconSize) / 2 * scale,
+            y: (canvas.height - iconSize) / 2 * scale,
+            width: iconSize * scale,
+            height: iconSize * scale
+        )
+        var proposed = rect
+        guard let cgIcon = icon.cgImage(forProposedRect: &proposed, context: nil, hints: nil) else {
+            return nil
+        }
+        context.interpolationQuality = .high
+        context.draw(cgIcon, in: rect)
+        guard let image = context.makeImage() else {
+            return nil
+        }
+        return CapturedImage(cgImage: image, scale: scale)
     }
 }

@@ -23,26 +23,52 @@ enum ScreenCapture {
             }
             return window.title != nil
         }
-        // CGPreflightScreenCaptureAccess() only returns an initial value,
-        // but we can use it as a fallback.
-        return CGPreflightScreenCaptureAccess()
+        // There are no item windows on macOS 27. The titles of other processes' windows are
+        // only readable with screen capture permissions, so any on-screen window of another
+        // process that carries one settles it. CGPreflightScreenCaptureAccess() only returns
+        // the value the process started with, so it can only confirm, never deny.
+        return otherProcessWindowTitlesAreReadable() || CGPreflightScreenCaptureAccess()
+    }
+
+    /// Returns a Boolean value that indicates whether the title of any on-screen window
+    /// owned by another process can be read.
+    private static func otherProcessWindowTitlesAreReadable() -> Bool {
+        let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+        guard let windows = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[CFString: Any]] else {
+            return false
+        }
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        return windows.contains { window in
+            guard
+                let pid = window[kCGWindowOwnerPID] as? pid_t,
+                pid != ownPID,
+                let title = window[kCGWindowName] as? String
+            else {
+                return false
+            }
+            return !title.isEmpty
+        }
     }
 
     /// Returns a Boolean value that indicates whether the app has screen
     /// capture permissions.
     ///
-    /// This function caches its initial result and returns it on subsequent
-    /// calls. Pass `true` to the `reset` parameter to replace the cached
-    /// result with a newly computed value.
+    /// This function caches a positive result for good and a negative one
+    /// for a few seconds. Pass `true` to the `reset` parameter to replace
+    /// the cached result with a newly computed value.
     static func cachedCheckPermissions(reset: Bool = false) -> Bool {
         enum Context {
             static var cachedResult: Bool?
+            static var checkedAt = ContinuousClock.now
         }
-        if !reset, let result = Context.cachedResult {
+        // A granted permission stays granted for the life of the process, but a denied one
+        // can be granted at any moment, so a negative result is only reused for a short while.
+        if !reset, let result = Context.cachedResult, result || ContinuousClock.now - Context.checkedAt < .seconds(2) {
             return result
         }
         let result = checkPermissions()
         Context.cachedResult = result
+        Context.checkedAt = .now
         return result
     }
 

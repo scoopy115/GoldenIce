@@ -346,6 +346,7 @@ final class ItemImageStore27 {
         // be photographed at all. Revealed in a burst without waiting, they were caught
         // mid-fade instead: the concealment applies behind them were still landing a second
         // and a half later, long after the capture judged the bar settled.
+        var folded = [String]()
         for bundleID in bundleIDs.sorted().prefix(Self.photographsPerPass) {
             appState.concealer27.showTemporarily(bundleID: bundleID)
             // A shown item is drawn 0.4–0.6 s after its application is allowed (measured).
@@ -354,15 +355,46 @@ final class ItemImageStore27 {
             // must not be answered by one taken before the item appeared.
             await captureActiveMenuBar(appState: appState, force: true)
             appState.concealer27.endTemporaryShow(bundleID: bundleID)
-            // Only an application that came away with an image counts as photographed. One
-            // whose tile was refused, or whose item macOS folded away, would otherwise wait
-            // out the full ten minutes with no glyph at all in the Ice Bar.
+            if !hasImage(forBundleID: bundleID) {
+                folded.append(bundleID)
+                continue
+            }
+            photoSchedule.recordAttempt(bundleID: bundleID, now: ProcessInfo.processInfo.systemUptime, stored: true)
+        }
+        if !folded.isEmpty {
+            await photographIsolated(bundleIDs: folded, appState: appState)
+        }
+        // Only an application that came away with an image counts as photographed. One whose
+        // tile was refused, or whose item macOS folded away even with the bar cleared, would
+        // otherwise wait out the full ten minutes with no glyph at all in the Ice Bar.
+        for bundleID in folded {
             photoSchedule.recordAttempt(
                 bundleID: bundleID,
                 now: ProcessInfo.processInfo.systemUptime,
                 stored: hasImage(forBundleID: bundleID)
             )
         }
+    }
+
+    /// Photographs applications whose items macOS folded into its overflow when shown.
+    ///
+    /// On a full bar — a notched one usually is — an application shown on its own is drawn at
+    /// its place in MenuBarAgent's order, and if that place is among the folded ones it is never
+    /// drawn at all. Every other application is concealed for a moment instead, so the bar has
+    /// room for all of these at once, and a single capture takes them together: one flicker of
+    /// the bar rather than one per application (measured on macOS 27.0.1, 2026-10-09).
+    private func photographIsolated(bundleIDs: [String], appState: AppState) async {
+        let concealer = appState.concealer27
+        guard concealer.isolatedAllowlist == nil else {
+            return
+        }
+        logger.debug("Photographing \(bundleIDs.count, privacy: .public) folded applications on a cleared bar")
+        concealer.isolatedAllowlist = Set(bundleIDs).union([Constants.bundleIdentifier])
+        concealer.update()
+        try? await Task.sleep(for: .milliseconds(700))
+        await captureActiveMenuBar(appState: appState, force: true)
+        concealer.isolatedAllowlist = nil
+        concealer.update()
     }
 
     /// How many applications one pass photographs, so a first run does not spend a minute
