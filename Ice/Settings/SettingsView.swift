@@ -74,11 +74,16 @@ struct SettingsView: View {
                     sidebarItem(for: identifier)
                 }
             } header: {
-                Text("Ice")
-                    .font(.system(size: sidebarFontSize * 2.67, weight: .medium))
-                    .foregroundStyle(sidebarTextStyle)
-                    .padding(.leading, sidebarPadding)
-                    .padding(.bottom, sidebarFontSize)
+                HStack(spacing: 8) {
+                    if let icon = NSImage(named: NSImage.applicationIconName) {
+                        Image(nsImage: icon)
+                            .resizable()
+                            .frame(width: sidebarFontSize * 2.2, height: sidebarFontSize * 2.2)
+                    }
+                    GoldenIceWordmark(size: sidebarFontSize * 1.6)
+                }
+                .padding(.leading, sidebarPadding)
+                .padding(.bottom, sidebarFontSize)
             }
             .collapsible(false)
         }
@@ -97,9 +102,8 @@ struct SettingsView: View {
                 .font(.system(size: sidebarFontSize))
                 .foregroundStyle(sidebarTextStyle)
         } icon: {
-            identifier.iconResource.view
-                .foregroundStyle(sidebarTextStyle)
-                .padding(sidebarPadding)
+            IconTile(icon: identifier.iconResource, color: identifier.tileColor, size: sidebarItemHeight * 0.72)
+                .saturation(appearsActive ? 1 : 0.4)
         }
         .frame(height: sidebarItemHeight)
         .tag(identifier)
@@ -118,12 +122,31 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var detailView: some View {
-        if #available(macOS 26.0, *) {
-            settingsPane
-                .scrollEdgeEffectStyle(.hard, for: .top)
-        } else {
-            settingsPane
+        VStack(spacing: 0) {
+            paneHeader
+            if #available(macOS 26.0, *) {
+                settingsPane
+                    .scrollEdgeEffectStyle(.hard, for: .top)
+            } else {
+                settingsPane
+            }
         }
+    }
+
+    /// The pane's tile and one line on what it is for.
+    @ViewBuilder
+    private var paneHeader: some View {
+        let identifier = navigationState.settingsNavigationIdentifier
+        HStack(spacing: 10) {
+            IconTile(icon: identifier.iconResource, color: identifier.tileColor, size: 26)
+            Text(identifier.subtitle)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 10)
+        .padding(.bottom, 2)
     }
 
     @ViewBuilder
