@@ -17,6 +17,11 @@ struct AboutSettingsPane: View {
 
     private var contributeURL: URL {
         // swiftlint:disable:next force_unwrapping
+        URL(string: "https://github.com/scoopy115/GoldenIce")!
+    }
+
+    private var upstreamURL: URL {
+        // swiftlint:disable:next force_unwrapping
         URL(string: "https://github.com/jordanbaird/Ice")!
     }
 
@@ -85,12 +90,16 @@ struct AboutSettingsPane: View {
                 }
 
                 VStack(alignment: .leading) {
-                    Text("Ice")
-                        .font(.system(size: 80))
+                    Text("GoldenIce")
+                        .font(.system(size: 64))
                         .foregroundStyle(.primary)
 
                     Text("Version \(Constants.versionString)")
                         .font(.system(size: 15))
+                        .foregroundStyle(.secondary)
+
+                    Text("Ice, with support for macOS 27 Golden Gate.")
+                        .font(.system(size: 14))
                         .foregroundStyle(.secondary)
 
                     Text(Constants.copyrightString)
@@ -145,20 +154,23 @@ struct AboutSettingsPane: View {
     @ViewBuilder
     private func bottomBar(containerShape: some InsettableShape) -> some View {
         HStack {
-            Button("Quit Ice") {
+            Button("Quit") {
                 NSApp.terminate(nil)
             }
             Spacer()
-            Button("Acknowledgements") {
+            Button("Credits") {
                 NSWorkspace.shared.open(acknowledgementsURL)
             }
-            Button("Contribute") {
+            Button("GitHub") {
                 openURL(contributeURL)
             }
             Button("Report a Bug") {
                 openURL(issuesURL)
             }
-            Button("Support Ice", systemImage: "heart.circle.fill") {
+            Button("Original Ice") {
+                openURL(upstreamURL)
+            }
+            Button("Support", systemImage: "heart.circle.fill") {
                 openURL(donateURL)
             }
         }

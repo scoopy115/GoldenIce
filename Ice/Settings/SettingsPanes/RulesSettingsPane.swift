@@ -29,6 +29,13 @@ struct RulesSettingsPane: View {
 private struct RulesSettingsPane27: View {
     @ObservedObject var concealer: Concealer27
 
+    static func displayName(for bundleID: String) -> String {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
+            return bundleID
+        }
+        return FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")
+    }
+
     var body: some View {
         IceForm {
             IceSection {
@@ -43,7 +50,9 @@ private struct RulesSettingsPane27: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 4)
             }
-            let applications = concealer.hiddenApplications
+            let applications = concealer.hiddenApplications.sorted { lhs, rhs in
+                Self.displayName(for: lhs.bundleID).localizedStandardCompare(Self.displayName(for: rhs.bundleID)) == .orderedAscending
+            }
             if applications.isEmpty {
                 IceSection {
                     VStack(spacing: 6) {
